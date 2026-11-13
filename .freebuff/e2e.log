@@ -1,0 +1,136 @@
+[1/8] starting protected target app on :8081 (connection-holding mode)
+[2/8] starting control plane (FastAPI PDP) on :8010
+[3/8] starting data plane (Netty PEP) on :9010 (revalidation 2s)
+
+== 1. Cloaking: connect to the PEP without authenticating ==
+PEP said: DATA=b''
+PASS: connection closed with zero payload -> client sees silence
+
+== 2. Policy engine: entitlement and posture are enforced before any tunnel ==
+PASS: alice asking for bob's app -> HTTP 403 (not entitled)
+PASS: compromised-device posture -> HTTP 403 (disk_encrypted=false)
+PASS: denied logins created no route records
+
+== 3. Authenticate alice and provision the micro-tunnel ==
+login response: {"access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhbGljZSIsInJvbGUiOiJkZXZlbG9wZXIiLCJjbGllbnRfaXAiOiIxMjcuMC4wLjEiLCJqdGkiOiI3NGE4ZGFmYmFiMDU0ZjRhOGRhZDJjMWUzYzM0ODFjZSIsImlhdCI6MTc5MjAzMDM3MSwiZXhwIjoxNzkyMDMzOTcxLCJiaW5kaW5nIjoiMTI3LjAuMC4xIn0.HlA-2aJhFw8HbLEwEmUMXsJBCkqPc-bHvXd71idWg9g", "token_type": "bearer", "expires_in": 3600, "app": "internal-api", "target": "127.0.0.1:8080", "route_key": "route:127.0.0.1", "posture": "pass", "binding": "127.0.0.1", "device": ""}
+redis route:127.0.0.1 = 127.0.0.1:8080 (TTL 3600s)
+redis sess:127.0.0.1  = user alice role developer app internal-api target 127.0.0.1:8080 jti 74a8dafbab054f4a8dad2c1e3c3481ce client_ip 127.0.0.1 device  
+
+== 4. Micro-tunnel: same client now reaches the protected app ==
+PEP said: DATA=b'aegisx-demo-target tunnel established on :8080\n'
+PASS: bytes proxied through the authorized tunnel
+
+== 5. Real probe endpoint reports what the gate decided ==
+probe response: {"allowed":true,"reachable":true,"addr":"127.0.0.1:9010","detail":"proxied through the authorized micro-tunnel: aegisx-demo-target tunnel established on :8080","cert":"","device":"","tls":false,"tls_error":false,"payload":"aegisx-demo-target tunnel established on :8080\n"}
+PASS: real TCP probe through the PEP -> ALLOW
+
+== 6. Continuous verification: token and metrics while live ==
+{"active":true,"sub":"alice","role":"developer","client_ip":"127.0.0.1","jti":"74a8dafbab054f4a8dad2c1e3c3481ce","exp":1792033971,"binding":"127.0.0.1","device":""}
+metrics: {"pep_allow_total":2,"pep_deny_total":4,"pep_closed_total":2,"pep_revoked_total":6,"logins_ok_total":1,"logins_denied_total":2,"admin_revocations_total":0,"pep_active_tunnels":0,"active_sessions":1,"version":"0.3.0","pep_probe_addr":"127.0.0.1:9010"}
+
+== 7. Hold a tunnel open, then revoke the session underneath it ==
+PASS: tunnel open and carrying bytes (client is idle, waiting)
+{"status":"revoked","jti":"74a8dafbab054f4a8dad2c1e3c3481ce"}
+redis route:127.0.0.1 = ''  (deleted)
+PASS: revoked token rejected (HTTP 401)
+BANNER=b'aegisx-demo-target tunnel established on :8080\n'
+CLOSED_AFTER=2.0
+PASS: the ALREADY-OPEN tunnel was closed by PEP revalidation, not by a new connection
+
+== 8. Cloaking restored: PEP refuses the same client again ==
+PEP said: DATA=b''
+PASS: connection silently dropped again
+
+== audit trail (Redis Stream) ==
+  1792030373835-0
+  event
+  pep.deny
+  ts
+  1792030373
+  layer
+  pep
+  client_ip
+  127.0.0.1
+  detail
+  no-route-record
+  1792030373669-0
+  event
+  tunnel.closed
+  ts
+  1792030373
+  layer
+  pep
+  client_ip
+  127.0.0.1
+  target
+  127.0.0.1:8080
+  1792030373665-0
+  event
+  pep.revoke
+  ts
+  1792030373
+  layer
+  pep
+  client_ip
+  127.0.0.1
+  detail
+  session-revoked
+  1792030371877-0
+  event
+  logout
+  ts
+  1792030371
+  subject
+  alice
+  client_ip
+  127.0.0.1
+  jti
+  74a8dafbab054f4a8dad2c1e3c3481ce
+  binding
+  127.0.0.1
+  1792030371659-0
+  event
+  pep.allow
+  ts
+  1792030371
+  layer
+  pep
+  client_ip
+  127.0.0.1
+  target
+  127.0.0.1:8080
+  1792030371621-0
+  event
+  tunnel.closed
+  ts
+  1792030371
+  layer
+  pep
+  client_ip
+  127.0.0.1
+  target
+  127.0.0.1:8080
+  1792030371619-0
+  event
+  pep.allow
+  ts
+  1792030371
+  layer
+  pep
+  client_ip
+  127.0.0.1
+  target
+  127.0.0.1:8080
+  1792030371608-0
+  event
+  tunnel.closed
+  ts
+  1792030371
+  layer
+  pep
+  client_ip
+  127.0.0.1
+  target
+  127.0.0.1:8080
+
+ALL CHECKS PASSED

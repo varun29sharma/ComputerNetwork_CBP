@@ -1,0 +1,17 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Java / Maven
+data-plane/target/
+
+# Local tooling / logs
+.tools/
+
+# Throwaway demo PKI (scripts/gen_certs.sh) -- never commit a private key
+certs/
+
+# OS
+.DS_Store

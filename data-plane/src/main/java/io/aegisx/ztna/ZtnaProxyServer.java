@@ -1,0 +1,137 @@
+package io.aegisx.ztna;
+
+import io.lettuce.core.RedisClient;
+import io.lettuce.core.RedisURI;
+import io.lettuce.core.api.StatefulRedisConnection;
+import io.lettuce.core.api.async.RedisAsyncCommands;
+import io.netty.bootstrap.ServerBootstrap;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelInitializer;
+import io.netty.channel.ChannelOption;
+import io.netty.channel.EventLoopGroup;
+import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.socket.nio.NioServerSocketChannel;
+import io.netty.channel.socket.SocketChannel;
+import io.netty.handler.ssl.ClientAuth;
+import io.netty.handler.ssl.SslContext;
+import io.netty.handler.ssl.SslContextBuilder;
+import java.io.File;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * AegisX Data Plane -- the Policy Enforcement Point (PEP).
+ *
+ * <p>Listens for client TCP connections and mediates every byte flowing to the
+ * protected applications. It makes no trust decisions of its own: the only
+ * authority it consults is the {@code route:<client_ip>} record provisioned by
+ * the control plane's Policy Administrator. Connections without a record are
+ * closed before a single byte of payload is read (SDP "Authenticate-Before-
+ * Connect" / cloaking).
+ *
+ * <p>Configuration (env):
+ * <ul>
+ *   <li>{@code AEGISX_PEP_PORT} (default 9000)</li>
+ *   <li>{@code AEGISX_REDIS_URL} (default redis://127.0.0.1:6379)</li>
+ *   <li>{@code AEGISX_REVALIDATE_SECONDS} (default 5, 0 disables) --
+ *       how often every <em>open</em> tunnel is re-checked against Redis</li>
+ *   <li>{@code AEGISX_MTLS} = 1 to require a client certificate, with
+ *       {@code AEGISX_MTLS_CERT}, {@code AEGISX_MTLS_KEY},
+ *       {@code AEGISX_MTLS_CA} (see scripts/gen_certs.sh)</li>
+ * </ul>
+ */
+public final class ZtnaProxyServer {
+
+    private static final Logger log = LoggerFactory.getLogger(ZtnaProxyServer.class);
+
+    public static void main(String[] args) throws Exception {
+        int port = Integer.parseInt(env("AEGISX_PEP_PORT", "9000"));
+        String redisUri = env("AEGISX_REDIS_URL", "redis://127.0.0.1:6379");
+        long revalidate = Long.parseLong(env("AEGISX_REVALIDATE_SECONDS", "5"));
+
+        // One shared, thread-safe async connection; every route lookup returns
+        // a RedisFuture instead of blocking an EventLoop thread.
+        RedisClient redisClient = RedisClient.create(RedisURI.create(redisUri));
+        StatefulRedisConnection<String, String> redisConnection = redisClient.connect();
+        RedisAsyncCommands<String, String> redis = redisConnection.async();
+
+        final SslContext sslContext = mtlsEnabled() ? buildServerSslContext() : null;
+
+        EventLoopGroup bossGroup = new NioEventLoopGroup(1);
+        EventLoopGroup workerGroup = new NioEventLoopGroup();
+
+        // Sharable: the handler is stateless apart from the shared Redis handle.
+        ZtnaAuthHandler authHandler = new ZtnaAuthHandler(redis, revalidate);
+
+        ServerBootstrap bootstrap = new ServerBootstrap()
+                .group(bossGroup, workerGroup)
+                .channel(NioServerSocketChannel.class)
+                // SDP cloak: never read payload until the handler authorizes.
+                // With mTLS the TLS handshake itself must be read before any
+                // decision is possible, so reads stay enabled there -- the
+                // handler then buffers everything that arrives before
+                // authorization and releases it only once the tunnel exists,
+                // so no payload reaches a protected app unauthorized either way.
+                .childOption(ChannelOption.AUTO_READ, sslContext != null)
+                .childOption(ChannelOption.TCP_NODELAY, true)
+                .childHandler(new ChannelInitializer<SocketChannel>() {
+                    @Override
+                    protected void initChannel(SocketChannel ch) {
+                        if (sslContext != null) {
+                            // Require the client certificate; the auth handler
+                            // waits for handshake completion before deciding.
+                            ch.pipeline().addLast(sslContext.newHandler(ch.alloc()));
+                        }
+                        ch.pipeline().addLast(authHandler);
+                    }
+                });
+
+        Channel serverChannel = bootstrap.bind(port).sync().channel();
+        log.info("AegisX ZTNA PEP (Policy Enforcement Point) listening on :{} (redis: {}, revalidation: {}, mTLS: {})",
+                port, redisUri,
+                revalidate > 0 ? revalidate + "s" : "disabled",
+                sslContext != null ? "required" : "off");
+        log.info("cloak: pre-authorization payload {}",
+                sslContext == null ? "never read (AUTO_READ=false)" : "buffered, never forwarded pre-authorization");
+
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            serverChannel.close();
+            bossGroup.shutdownGracefully();
+            workerGroup.shutdownGracefully();
+            redisConnection.close();
+            redisClient.shutdown();
+        }, "aegisx-shutdown"));
+
+        serverChannel.closeFuture().sync();
+    }
+
+    private static boolean mtlsEnabled() {
+        return "1".equals(env("AEGISX_MTLS", "0"));
+    }
+
+    /** Server context that demands a certificate signed by the AegisX demo CA. */
+    private static SslContext buildServerSslContext() throws Exception {
+        String cert = required("AEGISX_MTLS_CERT");
+        String key = required("AEGISX_MTLS_KEY");
+        String ca = required("AEGISX_MTLS_CA");
+        log.info("mTLS enabled: cert={} ca={}", cert, ca);
+        return SslContextBuilder
+                .forServer(new File(cert), new File(key))
+                .trustManager(new File(ca))
+                .clientAuth(ClientAuth.REQUIRE)
+                .build();
+    }
+
+    private static String required(String name) {
+        String value = System.getenv(name);
+        if (value == null || value.isBlank()) {
+            throw new IllegalStateException(name + " must be set when AEGISX_MTLS=1");
+        }
+        return value;
+    }
+
+    private static String env(String name, String fallback) {
+        String value = System.getenv(name);
+        return (value == null || value.isBlank()) ? fallback : value;
+    }
+}
