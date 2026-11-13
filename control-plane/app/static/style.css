@@ -55,6 +55,20 @@ header {
 nav a { color: var(--text-dim); text-decoration: none; font-size: 13.5px; margin-left: 22px; }
 nav a:hover { color: var(--text); }
 
+/* ---------- lockdown banner ---------- */
+/* Plain monochrome: white border, bold words. No colour — the text is the alarm. */
+#lockdown-banner {
+  display: none;
+  background: var(--surface);
+  border-bottom: 1px solid var(--text);
+  color: var(--text);
+  text-align: center;
+  font-family: var(--mono); font-size: 12.5px; font-weight: 700;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  padding: 12px 16px;
+}
+#lockdown-banner.on { display: block; }
+
 /* ---------- hero ---------- */
 .hero { padding: 72px 0 48px; }
 .kicker {
@@ -131,6 +145,15 @@ button:disabled { opacity: 0.35; cursor: not-allowed; }
 .btn-mini:hover { border-color: var(--text); }
 .toggle { display: flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: 12px; color: var(--text-dim); flex-wrap: wrap; }
 .toggle input { width: 16px; height: 16px; accent-color: var(--text); }
+
+/* ---------- policy editor ---------- */
+/* One bordered sub-panel per app, inside the admin card. */
+.policy-app {
+  border: 1px solid var(--border); border-radius: 13px;
+  background: var(--surface); padding: 16px; margin-bottom: 12px;
+}
+.policy-app h4 { font-family: var(--mono); font-size: 14px; margin-bottom: 12px; }
+.policy-app h4 .off { color: var(--text-faint); font-weight: 500; }
 
 /* ---------- gateway panel ---------- */
 .gateway { text-align: center; }

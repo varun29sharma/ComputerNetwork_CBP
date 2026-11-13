@@ -9,6 +9,8 @@ const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 let token = null;      // the demo user's JWT (null = logged out)
 let adminToken = null; // the admin console's JWT (null = not authenticated)
 let ENTITLED = {};     // username -> { apps: [...] }, filled from /dashboard/state
+let POLICY = {};       // app name -> live policy record, filled from /admin/policy
+let lockdownOn = false; // true while /dashboard/state reports lockdown
 let fzBusy = false;    // true while the open-then-revoke story is playing
 
 const PW = { alice: "alice-dev-pw", bob: "bob-analyst-pw", admin: "admin-console-pw" };
@@ -66,11 +68,27 @@ function eventClass(ev) {
 async function refreshState() {
   let s;
   try {
-    s = await (await fetch("/dashboard/state", { cache: "no-store" })).json();
+    // An admin token unlocks the sensitive fields when the dashboard-auth
+    // flag is on; without one the request goes out exactly as before.
+    const headers = {};
+    if (adminToken) headers.Authorization = "Bearer " + adminToken;
+    s = await (await fetch("/dashboard/state", { cache: "no-store", headers })).json();
   } catch (e) {
     $("hero-redis").textContent = "unreachable";
     return;
   }
+
+  // When the dashboard-auth flag is on, an unauthenticated request gets
+  // counters only — default the withheld lists instead of crashing on them.
+  s.routes = s.routes || [];
+  s.sessions = s.sessions || [];
+  s.audit = s.audit || [];
+  s.denylisted = s.denylisted || [];
+  s.rate_limits = s.rate_limits || [];
+  s.lockouts = s.lockouts || [];
+  s.apps = s.apps || [];
+  s.certs = s.certs || [];
+  setLockdownUI(s.lockdown === true);
 
   $("hero-redis").textContent = "connected";
   $("hero-tunnels").textContent = s.routes.length;
@@ -311,10 +329,11 @@ async function adminLogin() {
   if (!res.ok) { toast("Admin authentication failed", "err"); return; }
   adminToken = (await res.json()).access_token;
   $("btn-admin-refresh").disabled = false;
+  $("btn-lockdown").disabled = false;
   $("admin-note").innerHTML = "Authenticated with an <b>admin</b>-role token — it carries no data-plane " +
     "entitlement, so it can administer sessions but can never open a tunnel.";
   log("POST /auth/login → 200 · admin console authenticated", "ok");
-  await Promise.all([adminRefresh(), refreshState()]);
+  await Promise.all([adminRefresh(), loadPolicy(), refreshState()]);
 }
 
 async function adminRefresh() {
@@ -324,6 +343,10 @@ async function adminRefresh() {
     fetch("/admin/sessions", { headers: hdr }).then((r) => r.json()),
     fetch("/admin/apps", { headers: hdr }).then((r) => r.json()),
   ]);
+  // Lockouts are read-only rows, so they are safe to refresh on the 4s poll
+  // alongside sessions. The policy editor is NOT here: re-rendering it would
+  // wipe edits the admin is halfway through typing (see loadPolicy).
+  await loadLockouts();
   $("admin-rows").innerHTML = sessions.length
     ? sessions.map((s) => '<tr><td class="k">' + (s.device ? "cert " + s.device : "ip " + s.client_ip) +
         "</td><td>" + s.user + "</td><td>" + s.app + "</td><td>" + s.ttl + "s</td>" +
@@ -354,6 +377,167 @@ async function revokeSession(device, ip) {
   toast("Force-revoked " + body.revoked_user + " at " + body.client_ip, "ok");
   log("POST /admin/revoke → 200 · " + body.revoked_user + " (" + body.binding + ") denylisted + route deleted", "err");
   await Promise.all([adminRefresh(), refreshState()]);
+}
+
+// ---- policy editor -------------------------------------------------------
+
+async function loadPolicy() {
+  // Loaded on demand only (admin login, manual refresh, after a save/delete)
+  // — never on the 4s poll, or re-rendering would wipe edits the admin is
+  // halfway through typing.
+  if (!adminToken) return;
+  const res = await fetch("/admin/policy", { headers: { Authorization: "Bearer " + adminToken } });
+  if (!res.ok) {
+    $("policy-list").innerHTML = '<p class="note">Policy unavailable (' + res.status + ").</p>";
+    return;
+  }
+  POLICY = (await res.json()).apps || {};
+  renderPolicy();
+}
+
+function renderPolicy() {
+  const names = Object.keys(POLICY);
+  if (!names.length) {
+    $("policy-list").innerHTML = '<p class="note">No applications in policy.</p>';
+    return;
+  }
+  $("policy-list").innerHTML = names.map((name) => {
+    const rec = POLICY[name];
+    const posture = rec.posture || {};
+    return '<div class="policy-app" data-app="' + esc(name) + '">' +
+      "<h4>" + esc(name) + (rec.enabled ? "" : ' <span class="off">(disabled)</span>') + "</h4>" +
+      '<div class="field"><label>Target (host:port)</label>' +
+      '<input class="pol-target" value="' + esc(rec.target) + '"></div>' +
+      '<div class="field"><label>Allowed hours</label>' +
+      '<input class="pol-hours" value="' + esc(rec.allowed_hours || "") + '" placeholder="09:00-18:00, empty = always"></div>' +
+      '<div class="field"><label>Session TTL (seconds)</label>' +
+      '<input class="pol-ttl" type="number" min="1" value="' + esc(rec.session_ttl_seconds) + '"></div>' +
+      '<div class="field"><div class="toggle"><input type="checkbox" class="pol-disk"' +
+      (posture.disk_encrypted ? " checked" : "") + '><span>require disk_encrypted</span>' +
+      '<input type="checkbox" class="pol-enabled"' + (rec.enabled ? " checked" : "") + '><span>enabled</span></div></div>' +
+      '<div class="row"><button class="btn-primary pol-save">Save</button>' +
+      '<button class="btn-ghost pol-delete">Delete</button></div></div>';
+  }).join("");
+  document.querySelectorAll("#policy-list .policy-app").forEach((card) => {
+    card.querySelector(".pol-save").addEventListener("click", () => savePolicy(card));
+    card.querySelector(".pol-delete").addEventListener("click", () => deletePolicy(card));
+  });
+}
+
+async function savePolicy(card) {
+  const app = card.dataset.app;
+  const ttl = parseInt(card.querySelector(".pol-ttl").value, 10);
+  if (!Number.isInteger(ttl) || ttl < 1) {
+    toast("Session TTL must be a whole number of seconds (at least 1)", "err");
+    return;
+  }
+  // Merge with the loaded posture instead of replacing it: the editor only
+  // shows disk_encrypted, and any other posture keys must survive a save.
+  // And unchecking removes the rule entirely — {disk_encrypted: false} would
+  // demand an UNencrypted disk, which is the opposite of "no requirement".
+  const posture = Object.assign({}, (POLICY[app] && POLICY[app].posture) || {});
+  if (card.querySelector(".pol-disk").checked) posture.disk_encrypted = true;
+  else delete posture.disk_encrypted;
+  const res = await fetch("/admin/policy/" + encodeURIComponent(app), {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", Authorization: "Bearer " + adminToken },
+    body: JSON.stringify({
+      target: card.querySelector(".pol-target").value.trim(),
+      posture: posture,
+      allowed_hours: card.querySelector(".pol-hours").value.trim(),
+      session_ttl_seconds: ttl,
+      enabled: card.querySelector(".pol-enabled").checked,
+    }),
+  });
+  const body = await res.json();
+  if (!res.ok) { toast("Save failed: " + (body.detail || res.status), "err"); return; }
+  toast("Policy saved for " + app, "ok");
+  await loadPolicy();
+}
+
+async function deletePolicy(card) {
+  const app = card.dataset.app;
+  if (!confirm('Delete the policy for "' + app + '"? Future logins for it will be denied.')) return;
+  const res = await fetch("/admin/policy/" + encodeURIComponent(app), {
+    method: "DELETE",
+    headers: { Authorization: "Bearer " + adminToken },
+  });
+  const body = await res.json();
+  if (!res.ok) { toast("Delete failed: " + (body.detail || res.status), "err"); return; }
+  toast("Policy deleted for " + app, "ok");
+  await loadPolicy();
+}
+
+// ---- lockout management --------------------------------------------------
+
+async function loadLockouts() {
+  if (!adminToken) return;
+  const res = await fetch("/admin/lockouts", { headers: { Authorization: "Bearer " + adminToken } });
+  if (!res.ok) {
+    $("lockout-rows").innerHTML = '<tr><td colspan="4" class="note">Lockout list unavailable (' + res.status + ").</td></tr>";
+    return;
+  }
+  const data = await res.json();
+  const rows = [];
+  for (const u of (data.users || [])) {
+    rows.push('<tr><td>user</td><td class="k">' + esc(u.username) + "</td><td>" + u.remaining_seconds +
+      's</td><td><button class="btn-mini" data-username="' + esc(u.username) + '">unlock</button></td></tr>');
+  }
+  // Rate-limited IPs are NOT locked out -- they are just inside a per-IP
+  // rate-limit window (opened by any login attempt). Label them as such.
+  for (const entry of (data.rate_limited_ips || [])) {
+    rows.push('<tr><td>rate-limited ip</td><td class="k">' + esc(entry.ip) + "</td><td>" + entry.remaining_seconds +
+      's</td><td><button class="btn-mini" data-ip="' + esc(entry.ip) + '">unlock</button></td></tr>');
+  }
+  $("lockout-rows").innerHTML = rows.length ? rows.join("")
+    : '<tr><td colspan="4" class="note">No locked users or rate-limited IPs.</td></tr>';
+  document.querySelectorAll("#lockout-rows .btn-mini").forEach((b) => {
+    b.addEventListener("click", () => unlockEntry(b.dataset.username, b.dataset.ip));
+  });
+}
+
+async function unlockEntry(username, ip) {
+  // One endpoint clears either kind of lockout; the body says which.
+  const payload = username ? { username: username } : { ip: ip };
+  const res = await fetch("/admin/unlock", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: "Bearer " + adminToken },
+    body: JSON.stringify(payload),
+  });
+  const body = await res.json();
+  if (!res.ok) { toast("Unlock failed: " + (body.detail || res.status), "err"); return; }
+  toast("Unlocked " + (username || ip), "ok");
+  await loadLockouts();
+}
+
+// ---- lockdown ------------------------------------------------------------
+
+// One place owns the lockdown display: the banner, the toggle label and the
+// note all follow the same value, refreshed on every state poll.
+function setLockdownUI(on) {
+  lockdownOn = on;
+  $("lockdown-banner").classList.toggle("on", on);
+  $("btn-lockdown").textContent = on ? "Disable lockdown" : "Enable lockdown";
+  $("lockdown-note").textContent = on
+    ? "Lockdown is ON — all logins are denied."
+    : "Lockdown is off.";
+}
+
+async function toggleLockdown() {
+  // Flipping lockdown is a serious action, so confirm first — the label, not
+  // a colour, is what marks it as destructive.
+  const turningOn = !lockdownOn;
+  if (turningOn && !confirm("Enable lockdown? All logins will be denied until you turn it off again.")) return;
+  const res = await fetch("/admin/lockdown", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: "Bearer " + adminToken },
+    body: JSON.stringify({ on: turningOn }),
+  });
+  const body = await res.json();
+  if (!res.ok) { toast("Lockdown failed: " + (body.detail || res.status), "err"); return; }
+  setLockdownUI(body.lockdown === true);
+  toast(turningOn ? "Lockdown enabled — all logins denied" : "Lockdown disabled", "ok");
+  await refreshState();
 }
 
 // ==========================================================================
@@ -753,7 +937,10 @@ $("btn-login").addEventListener("click", login);
 $("btn-logout").addEventListener("click", logout);
 $("btn-probe").addEventListener("click", probeGateway);
 $("btn-admin-login").addEventListener("click", adminLogin);
-$("btn-admin-refresh").addEventListener("click", adminRefresh);
+// Manual refresh reloads the policy editor too — the 4s poll deliberately
+// does not, so it never wipes an edit in progress (see loadPolicy).
+$("btn-admin-refresh").addEventListener("click", () => { adminRefresh(); loadPolicy(); });
+$("btn-lockdown").addEventListener("click", toggleLockdown);
 $("att-user").addEventListener("change", () => { pickSurpriseApp(); updateHint(); });
 $("att-app").addEventListener("change", updateHint);
 $("btn-attempt").addEventListener("click", runAttempt);

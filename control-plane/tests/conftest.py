@@ -19,6 +19,7 @@ import pytest
 import redis as sync_redis
 from fastapi.testclient import TestClient
 
+from app import identity
 from app.main import app
 
 KEY_PREFIXES = (
@@ -29,9 +30,13 @@ KEY_PREFIXES = (
     "ipl:",
     "fails:",
     "lock:",
+    "policy:",
+    "cert:deny:",
+    "svc:",
 )
 KEY_EXACT = (
     "audit:events",
+    "admin:lockdown",
     "pep:allow",
     "pep:deny",
     "pep:closed",
@@ -56,5 +61,8 @@ def client(rdb):
             rdb.delete(key)
     if KEY_EXACT:
         rdb.delete(*KEY_EXACT)
+    # The policy cache is module-level, so it survives the Redis wipe above:
+    # drop it, or a policy a previous test PUT would leak into this one.
+    identity.invalidate_policy_cache()
     with TestClient(app) as c:
         yield c

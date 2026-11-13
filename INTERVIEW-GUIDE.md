@@ -12,8 +12,9 @@ command is named.
 > gateway then lets that one connection through and silently drops everyone
 > else — the protected app is invisible to unauthenticated clients. Sessions
 > are re-checked every five seconds, so revoking access kills open tunnels
-> too. 64 tests, Docker Compose demo, and a dashboard that shows the live
-> Redis state."
+> too. Policy is data in Redis, not code — an admin edits a rule and the
+> next login is judged by it, no restart. 107 tests, Docker Compose demo,
+> and a dashboard that shows the live Redis state."
 
 ## 2-minute deep dive
 
@@ -25,7 +26,9 @@ command is named.
 > TCP connection arrives it looks up that key — one async Redis read. If the
 > key exists it opens a tunnel to the app; if not, it closes the connection
 > with no payload. That is cloaking, from the SDP spec: an attacker cannot
-> even tell the app exists.
+> even tell the app exists. Policy itself is data, not code — the rules live
+> in a Redis hash, an admin edits them through an API, and the next login is
+> judged by the new rules with no restart.
 >
 > Two design choices I am proud of. First, the PDP never calls the PEP —
 > Redis is the only link, so either plane can restart independently. Second,
@@ -169,11 +172,70 @@ restarts.
 
 Four, and I would say them unprompted — interviewers trust that. One, the
 user directory is a demo stand-in for an OIDC/LDAP IdP, with demo passwords in
-`identity.py`. Two, `/dashboard/state` is unauthenticated on purpose for the
-demo; production gates it behind admin auth. Three, it is a single Redis with
+`identity.py`. Two, `/dashboard/state` is unauthenticated by default for the
+demo — there is a flag (`AEGISX_DASHBOARD_AUTH=1`) that redacts it without an
+admin token, but the default is still open. Three, it is a single Redis with
 no HA — if Redis dies, no new tunnels open (fail closed, but still down).
-Four, the tunnel destination is hardcoded per app in `APP_TARGETS`; making it
-environment-driven is the next change (the compose file documents this).
+Four, certificate revocation is a 24-hour deny entry, not a persistent CRL —
+after a day the certificate would work again — and the PEP-side revocation
+check has not been verified live yet, because the build VM blocks Java TCP.
+
+### 16. Policy-as-data vs policy-as-code — why move the rules into Redis?
+
+Policy-as-code means a rule change is a code change: edit a constant,
+redeploy, restart. Policy-as-data means the rules are records an admin edits
+through an API, and the next login is judged by them. The seed constants
+still exist — they are what a fresh install starts from — but the live
+policy is the Redis hash. The proof is the demo: PUT a posture rule, log in,
+and watch 200 flip to 403 with no restart. (`routes_policy.py`,
+`identity.get_policy`)
+
+### 17. Why cache the policy at all, if writes invalidate the cache?
+
+Two reasons. First, without a cache every login hits Redis for the policy,
+and a login storm becomes a Redis storm — the cache is one read per 5
+seconds instead of one per login. Second, the cache is only a *backstop*:
+every admin write calls `invalidate_policy_cache()`, so a rule change is
+live on the very next login. The 5-second TTL only covers edits made outside
+the API (someone writing to Redis by hand). So the cache buys performance
+without costing freshness — the worst case is 5 seconds, and only for
+out-of-band edits. (`identity.get_policy`, `identity.invalidate_policy_cache`)
+
+### 18. How does the emergency lockdown work, and why revoke everything?
+
+Lockdown is one Redis key, `admin:lockdown`. Turning it on sets the flag
+*and* revokes every live session through the normal revoke path — denylist
+the `jti`, delete the route and session — so open tunnels die at the next
+PEP revalidation, at most 5 seconds later. Just blocking new logins would
+leave every existing tunnel live until its TTL, which could be an hour; in
+an incident, an hour is the whole point of having a lockdown switch. While
+the flag is on, every login is 403 before credentials are even checked, so
+nobody can log in during the incident — including service accounts.
+(`routes_admin.set_lockdown`, `routes_auth._deny_if_lockdown`)
+
+### 19. Certificate revocation vs session revocation — why do you need both?
+
+Session revocation kills one tunnel: delete the route, denylist the token.
+But the *credential* — the certificate — is still valid, so the same device
+can just log in again and get a new tunnel. Certificate revocation kills the
+credential: `cert:deny:<CN>` blocks new logins and new tunnels for that CN,
+and the revoke endpoint also kills the CN's live sessions in the same call,
+because the deny key alone only stops *new* tunnels. You need both because
+they answer different questions — "stop this session" vs "stop this device".
+The honest caveat: the deny entry expires after 24 hours, so this is a demo
+CRL, not a production one. (`routes_admin.revoke_device`,
+`ZtnaAuthHandler.checkCertNotRevoked`)
+
+### 20. Why is the PEP's revocation check async? Couldn't it just block?
+
+For the same reason the route lookup is async: the PEP runs on Netty
+EventLoops, and one thread serves many connections. A blocking Redis call in
+the auth path would stall every connection on that loop for the whole Redis
+round-trip. So the revocation check is a Lettuce future, chained after the
+route lookup — route first, then `cert:deny:<CN>`, then open the tunnel —
+and a Redis error fails closed, exactly like the route lookup. The ordering
+matters too: checking revocation before the route would waste a Redis call
+on connections that have no route anyway. (`ZtnaAuthHandler` §2b)
 
 ## If they ask you to demo it (60 seconds)
 

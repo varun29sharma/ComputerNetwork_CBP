@@ -42,3 +42,13 @@ PEP_PROBE_ADDR = os.getenv("AEGISX_PEP_PROBE_ADDR", "127.0.0.1:9000")
 # login can bind its session to the device identity it will connect with.
 ROOT_DIR = str(Path(__file__).resolve().parents[2])
 CERTS_DIR = os.getenv("AEGISX_CERTS_DIR", os.path.join(ROOT_DIR, "certs"))
+
+# Policy-as-data: how long the PDP caches the policy it read from Redis
+# (seconds). Admin writes invalidate the cache immediately, so this is only
+# a backstop against a Redis read on every single login.
+POLICY_CACHE_SECONDS = int(os.getenv("AEGISX_POLICY_CACHE_SECONDS", "5"))
+
+# Dashboard auth: when on, /dashboard/state only shows sensitive fields
+# (sessions, audit, Redis keys) to a request carrying a valid admin token;
+# counters stay public. Default off so the demo works with no setup.
+DASHBOARD_AUTH = os.getenv("AEGISX_DASHBOARD_AUTH", "0") == "1"

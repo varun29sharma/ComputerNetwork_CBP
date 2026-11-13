@@ -16,6 +16,8 @@ import io.netty.handler.ssl.ClientAuth;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import java.io.File;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -45,6 +47,9 @@ import org.slf4j.LoggerFactory;
  *   <li>{@code AEGISX_MTLS} = 1 to require a client certificate, with
  *       {@code AEGISX_MTLS_CERT}, {@code AEGISX_MTLS_KEY},
  *       {@code AEGISX_MTLS_CA} (see scripts/gen_certs.sh)</li>
+ *   <li>{@code AEGISX_PEP_REQUIRE_READY} = 1 to wait for the control
+ *       plane's {@code /ready} endpoint before binding (default off), with
+ *       {@code AEGISX_PDP_URL} (default http://127.0.0.1:8000)</li>
  * </ul>
  */
 public final class ZtnaProxyServer {
@@ -55,6 +60,14 @@ public final class ZtnaProxyServer {
         int port = Integer.parseInt(env("AEGISX_PEP_PORT", "9000"));
         String redisUri = env("AEGISX_REDIS_URL", "redis://127.0.0.1:6379");
         long revalidate = Long.parseLong(env("AEGISX_REVALIDATE_SECONDS", "5"));
+
+        // Optional startup gate (default off): refuse to bind at all until
+        // the control plane reports ready, so a PEP never listens while the
+        // PDP cannot provision routes. When the flag is off, no HTTP call
+        // is made and startup is exactly as before.
+        if ("1".equals(env("AEGISX_PEP_REQUIRE_READY", "0"))) {
+            requireControlPlaneReady(env("AEGISX_PDP_URL", "http://127.0.0.1:8000"));
+        }
 
         // One shared, thread-safe async connection; every route lookup returns
         // a RedisFuture instead of blocking an EventLoop thread.
@@ -114,6 +127,58 @@ public final class ZtnaProxyServer {
 
     private static boolean mtlsEnabled() {
         return "1".equals(env("AEGISX_MTLS", "0"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Startup readiness gate: poll the control plane's /ready endpoint
+    // before binding. If it never answers 200, exit without listening --
+    // a PEP that cannot reach its PDP must not accept connections.
+    //
+    // LIVE-UNVERIFIED: Java TCP is blocked in this VM -- verify by starting
+    // the PEP with Redis down and AEGISX_PEP_REQUIRE_READY=1 on a real machine.
+    // -----------------------------------------------------------------------
+    private static void requireControlPlaneReady(String pdpUrl) {
+        String readyUrl = pdpUrl + "/ready";
+        for (int attempt = 1; attempt <= 10; attempt++) {
+            if (controlPlaneReady(readyUrl)) {
+                log.info("control plane ready at {} (attempt {})", readyUrl, attempt);
+                return;
+            }
+            if (attempt < 10) {
+                // Backoff grows 1s, 2s, 3s ... capped at 5s.
+                sleepSeconds(Math.min(attempt, 5));
+            }
+        }
+        log.error("control plane never became ready at {} after 10 attempts -- exiting without binding",
+                readyUrl);
+        System.exit(1);
+    }
+
+    /** One readiness probe: true only on HTTP 200, false on any failure. */
+    private static boolean controlPlaneReady(String readyUrl) {
+        HttpURLConnection connection = null;
+        try {
+            connection = (HttpURLConnection) new URL(readyUrl).openConnection();
+            connection.setConnectTimeout(2000);
+            connection.setReadTimeout(2000);
+            connection.setRequestMethod("GET");
+            return connection.getResponseCode() == 200;
+        } catch (Exception e) {
+            log.debug("readiness probe failed for {}: {}", readyUrl, e.toString());
+            return false;
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
+        }
+    }
+
+    private static void sleepSeconds(long seconds) {
+        try {
+            Thread.sleep(seconds * 1000L);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     /** Server context that demands a certificate signed by the AegisX demo CA. */

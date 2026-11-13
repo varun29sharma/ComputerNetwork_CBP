@@ -31,7 +31,7 @@ import org.slf4j.LoggerFactory;
  * {@code channelActive} the handler extracts the source address and looks up
  * {@code route:<source_ip>} in Redis.
  *
- * <p>Four enforcement properties:
+ * <p>Five enforcement properties:
  * <ol>
  *   <li><b>Cloaking</b> -- unauthorized connections are closed with no reply,
  *       so the gateway is indistinguishable from a closed port.</li>
@@ -46,6 +46,9 @@ import org.slf4j.LoggerFactory;
  *   <li><b>Handshake first</b> -- when mTLS is enabled the route lookup waits
  *       for the TLS handshake, so an unauthenticated peer can never cause an
  *       outbound connection to a protected application.</li>
+ *   <li><b>Revocation</b> -- for certificate-bound sessions the route lookup
+ *       is followed by a check of {@code cert:deny:<CN>}: a revoked
+ *       certificate is denied even if its route record still exists.</li>
  * </ol>
  *
  * <p>Telemetry: allow/deny/active counters ({@code pep:*}) and an append-only
@@ -59,6 +62,8 @@ public final class ZtnaAuthHandler extends ChannelInboundHandlerAdapter {
     static final String ROUTE_KEY_PREFIX = "route:";
     /** Authorization namespace for certificate-bound sessions: route:device:<CN>. */
     static final String DEVICE_PREFIX = "device:";
+    /** Revoked certificates, written by the control plane: cert:deny:<CN>. */
+    static final String CERT_DENY_PREFIX = "cert:deny:";
     static final String AUDIT_STREAM = "audit:events";
 
     private static final AttributeKey<Boolean> AUTHORIZED = AttributeKey.valueOf("aegisx.authorized");
@@ -142,6 +147,47 @@ public final class ZtnaAuthHandler extends ChannelInboundHandlerAdapter {
                     if (target == null || target.isBlank()) {
                         deny(ctx, remoteIp, device != null
                                 ? "no-device-route" : "no-route-record");
+                        return;
+                    }
+                    if (device != null) {
+                        // Certificate-bound session: a route is not enough --
+                        // the certificate itself must not have been revoked.
+                        checkCertNotRevoked(ctx, remoteIp, device, routeKey, target);
+                        return;
+                    }
+                    authorize(ctx, remoteIp, routeKey, target);
+                }));
+    }
+
+    // -----------------------------------------------------------------------
+    // 2b. Revocation check: a revoked certificate never opens a tunnel, even
+    //     when its route record still exists. Plaintext (IP) sessions skip
+    //     this entirely -- there is no certificate to revoke.
+    //
+    //     LIVE-UNVERIFIED: Java TCP is blocked in this VM -- verify with
+    //     scripts/demo_mtls.sh plus a revoked cert on a real machine.
+    // -----------------------------------------------------------------------
+    /**
+     * Async check of {@code cert:deny:<CN>}, written by the control plane when
+     * an admin revokes a device. Key present means deny (cloaked, audited);
+     * a Redis error fails closed exactly like the route lookup above.
+     */
+    private void checkCertNotRevoked(ChannelHandlerContext ctx, String remoteIp,
+            String device, String routeKey, String target) {
+        String denyKey = CERT_DENY_PREFIX + device;
+        redis.exists(denyKey).whenComplete((count, error) ->
+                ctx.channel().eventLoop().execute(() -> {
+                    if (error != null) {
+                        // Fail closed: a state-store outage must never open the gate.
+                        log.error("Redis revocation lookup failed for {} -- closing {}",
+                                denyKey, remoteIp);
+                        deny(ctx, remoteIp, "state-store-error");
+                        return;
+                    }
+                    if (count != null && count > 0) {
+                        // The CN is named in the audit detail so the deny is
+                        // traceable to the revoked device, not just the IP.
+                        deny(ctx, remoteIp, "cert-revoked:" + device);
                         return;
                     }
                     authorize(ctx, remoteIp, routeKey, target);

@@ -29,6 +29,19 @@ Legend: **✅ done** · **▶ next** · **⏳ later**
 | `/ready` readiness endpoint (Redis ping + users seeded) | ✅ | `routes_health.py` (rework, Nov 2026) |
 | PEP load-test harness (accept-to-close latency) | ✅ | `scripts/loadtest_pep.py` (rework, Nov 2026) |
 | CI: Python tests + Java build + dashboard JS check | ✅ | `.github/workflows/ci.yml` (rework, Nov 2026) |
+| **Policy-as-data + hot reload** (Redis `policy:apps`, admin CRUD, dashboard editor) | ✅ | `tests/test_policy_data.py`, `routes_policy.py` (batch 2, Nov 2026) |
+| Time rules (`allowed_hours`) + per-app session TTL | ✅ | `tests/test_time_rules.py` (batch 2, Nov 2026) |
+| TLS on the control plane (dedicated PDP cert) | ✅ | `run_all.sh --tls`, `curl --cacert certs/ca.crt https://127.0.0.1:8000/health` (batch 2, Nov 2026) |
+| Device enrollment + certificate revocation | ✅ | `scripts/enroll_device.sh`, `tests/test_admin_ops.py` (batch 2; PEP-side check live-unverified) |
+| Admin user management (create / disable / enable) | ✅ | `tests/test_admin_ops.py` (batch 2, Nov 2026) |
+| Lockout management (list / unlock) | ✅ | `tests/test_admin_ops.py`, dashboard admin console (batch 2, Nov 2026) |
+| Emergency lockdown (logins 403 + revoke-all) | ✅ | `tests/test_admin_ops.py` (batch 2, Nov 2026) |
+| Audit export (JSON / CSV download) | ✅ | `tests/test_admin_ops.py` (batch 2, Nov 2026) |
+| Prometheus metrics (`/metrics/prometheus`) | ✅ | `tests/test_prometheus.py` (batch 2, Nov 2026) |
+| Dashboard auth flag (`AEGISX_DASHBOARD_AUTH=1`) | ✅ | `tests/test_dashboard_auth.py` (batch 2, Nov 2026) |
+| PEP reachability in the dashboard feed | ✅ | `tests/test_pep_reachable.py` (batch 2, Nov 2026) |
+| PEP readiness gate (`AEGISX_PEP_REQUIRE_READY=1`) | ✅ | `ZtnaProxyServer.java` (batch 2; live-unverified — Java TCP blocked in the build VM) |
+| Service accounts (API key → JWT, `role=service`) | ✅ | `tests/test_service_accounts.py` (batch 2 stretch, Nov 2026) |
 
 What it is *not* yet: a single-machine demo topology. It is a real enforcement
 path with real policy, real revocation and real cryptographic identity — but it
@@ -40,6 +53,18 @@ trust-proxy rule (1.1), the Docker Compose stack (2.1), the `/ready` endpoint
 load-test harness (2.3, without the blocking-Jedis comparison, which was
 deliberately not built), and CI (no roadmap item existed for it). See the
 marked items below.
+
+**Done in batch 2 (Nov 2026):** policy-as-data + hot reload (3.1), time
+rules + per-app TTL (3.2, slim — `allowed_hours` and `session_ttl_seconds`
+only; `require_mfa` and the risk score are still open), TLS on the control
+plane (1.3), device enrollment + certificate revocation (1.2b), the PEP
+readiness gate (2.2, PEP side), and Prometheus metrics export (Phase 4
+"Structured metrics export"). Plus items with no roadmap number: admin user
+management, lockout management, emergency lockdown, audit export, the
+dashboard-auth flag, PEP reachability in the dashboard feed, and service
+accounts (stretch). The PEP-side pieces (cert-revocation check, readiness
+gate) are **live-unverified** — Java TCP is blocked in the build VM, so
+verify them on a real machine. See the marked items below.
 
 ---
 
@@ -80,15 +105,33 @@ present; the source address is only the identity for plaintext sessions.
 - **Still open (1.2b)**: certificate registration is seeded demo data. A real
 deployment needs a signed enrollment/registration step (admin API, or the IdP
 issuing the certificate at provisioning time) plus revocation of a compromised
-certificate itself, not only of the sessions it opened. Worth noting that the
+certificate itself, not only of the sessions it opened.
+- **Done in batch 2 (Nov 2026) (1.2b)**: `POST /admin/devices` registers a
+  CN to a user; `scripts/enroll_device.sh <CN> <user>` mints the client
+  certificate (demo CA, 825-day default) and registers it in one step;
+  `POST /admin/devices/revoke` writes `cert:deny:<CN>` (24 h TTL) and
+  revokes the CN's live sessions; the PEP checks `cert:deny` at tunnel-open
+  (`ZtnaAuthHandler.checkCertNotRevoked`, async, fail-closed) and the login
+  path rejects a revoked cert with 403 before provisioning a route. The
+  24 h TTL is a demo CRL, not a real one — a production deployment needs a
+  persistent revocation list, because the entry expires and the certificate
+  would work again. **Live-unverified**: the PEP-side check needs
+  `scripts/demo_mtls.sh` plus a revoked cert on a real machine.
+  Worth noting that the
 model shifts the trust anchor to *key custody*: whoever can read a client key
 can act as that identity, so key protection (agent, keychain, TPM) becomes part
 of the security story rather than an implementation detail.
 - **Free win**: a session is now portable across network changes — the tunnel is
   bound to the certificate, so a new source address does not break (or leak) it.
 
-### 1.3 TLS on the control plane
+### 1.3 TLS on the control plane — ✅ done
 The PDP is plain HTTP today. Add HTTPS with the same demo CA.
+- **Done in batch 2 (Nov 2026)**: dedicated PDP server certificate
+  (`certs/pdp.crt`, CN `localhost`, SANs `localhost`/`127.0.0.1`) from
+  `scripts/gen_certs.sh`; `./scripts/run_all.sh --tls` or `AEGISX_TLS=1`
+  serves the PDP over HTTPS (uvicorn `--ssl-keyfile/--ssl-certfile`).
+  Plain HTTP stays the default, and the script refuses TLS mode early with
+  a clear hint if the PDP certificate is missing.
 - **Files**: `ZtnaProxyServer`-style SslContext is not needed; run uvicorn with
   `--ssl-keyfile/--ssl-certfile` (or terminate TLS in the deployment layer).
 - **Verify**: `curl --cacert certs/ca.crt https://127.0.0.1:8000/health`.
@@ -111,7 +154,7 @@ with healthchecks and the cert volume mounted read-only.
 - **Verify**: `docker compose up -d && ./scripts/demo_e2e.sh` against the
   published ports. This also gives a laptop-independent reproduction path.
 
-### 2.2 Readiness and liveness endpoints — ✅ done (endpoint only)
+### 2.2 Readiness and liveness endpoints — ✅ done
 `/health` is a single flat check today. Add `/ready` (Redis reachable **and**
 user directory seeded) and point the PEP at it at startup so it refuses to
 serve until it can read state.
@@ -119,6 +162,13 @@ serve until it can read state.
   `{"status": "ready"}` only when Redis pings OK and at least one `users:*`
   record exists, else 503. Not done: pointing the PEP at it at startup (the
   PEP still starts regardless; it fails closed per-connection instead).
+- **Done in batch 2 (Nov 2026)**: the PEP gate —
+  `AEGISX_PEP_REQUIRE_READY=1` makes `ZtnaProxyServer` poll the PDP's
+  `/ready` (default `http://127.0.0.1:8000`, 10 attempts, 1–5 s backoff)
+  before binding, and exit(1) without listening if the PDP never reports
+  ready. Default off, so startup is unchanged unless the flag is set.
+  **Live-unverified**: Java TCP is blocked in the build VM — verify by
+  starting the PEP with Redis down and the flag on, on a real machine.
 - **Files**: `main.py`, `ZtnaProxyServer.java`
 - **Verify**: a test that stops Redis and asserts `/ready` → 503 while `/health`
   still answers, plus a PEP test that starts with Redis down and refuses traffic.
@@ -148,19 +198,36 @@ every role onto `127.0.0.1`. Needed to show real segmentation.
 
 ## Phase 3 ⏳ — Policy depth (2–4 days)
 
-### 3.1 Policy as data, not Python constants
+### 3.1 Policy as data, not Python constants — ✅ done
 Move `APP_TARGETS` / `POSTURE_RULES` into Redis (`policy:apps`) with an admin
 write API, hot-reloaded by the PDP on change (and optionally by the PEP for
 per-app rules).
+- **Done in batch 2 (Nov 2026)**: the live policy is the Redis hash
+  `policy:apps` (one JSON record per app: `target`, `posture`,
+  `allowed_hours`, `session_ttl_seconds`, `enabled`); `APP_TARGETS` /
+  `POSTURE_RULES` are now only the seed defaults, and `policy:seeded` stops
+  the seed resurrecting a deleted app. `GET/PUT/DELETE /admin/policy`
+  (`routes_policy.py`) edits it, a dashboard policy editor sits in the
+  admin console, and every write invalidates the 5 s in-memory cache
+  (`identity.invalidate_policy_cache`), so the next login is judged by the
+  new rules with no restart. The PEP does not read policy — it only ever
+  sees the route the PDP wrote, so no PEP hot-reload was needed.
 - **Files**: `identity.py`, new `admin` endpoints, dashboard policy editor.
 - **Verify**: change a posture rule through the API and show the next login
-  flipping from 200 to 403 with no restart.
+  flipping from 200 to 403 with no restart. (`tests/test_policy_data.py`)
 
-### 3.2 Time, location and risk signals
+### 3.2 Time, location and risk signals — ✅ done (slim)
 Add `allowed_hours`, per-app `require_mfa`, and a simple risk score that
 downgrades a session (shorter TTL) instead of hard-denying.
+- **Done in batch 2 (Nov 2026) (slim)**: `allowed_hours` (`"HH:MM-HH:MM"`,
+  same-day only, empty = always) denies logins outside the window with a
+  message naming the window, and per-app `session_ttl_seconds` (60–86400)
+  sets the route + session lifetime — the short-TTL half of the "downgrade
+  instead of deny" idea, minus the risk score. Still open: `require_mfa`
+  (see `docs/feature-ideas.md` idea 26, TOTP) and the risk score itself.
 - **Verify**: table-driven tests per rule, plus a demo where the same identity
-  gets a 60-second tunnel outside business hours.
+  gets a 60-second tunnel outside business hours. (`tests/test_time_rules.py`:
+  set `session_ttl_seconds: 60` on an app and the route TTL is 60 s.)
 
 ### 3.3 Real IdP instead of the Redis directory
 Swap `identity.verify_credentials` for an OIDC authorization-code flow, keeping
@@ -187,7 +254,7 @@ used for SSH on that port.
 | Session revocation bus | Peers learn about revocations immediately instead of on the next poll | Redis pub/sub → PEP closes the tunnel within milliseconds; keep polling as the safety net |
 | SPIFFE/SPIRE workload identity | Identity for services, not only humans | Replaces static certs with short-lived SVIDs, ideally the next step after 1.2 |
 | eBPF/XDP default-drop | Move the deny decision into the NIC driver for line-rate DDoS immunity | The report's headline stretch goal; needs a Linux host, so it is deliberately out of scope for this macOS demo |
-| Structured metrics export | `/metrics` is JSON today | Emit Prometheus text format (or OpenTelemetry) and dashboard the four golden signals |
+| Structured metrics export | `/metrics` is JSON today | ✅ done in batch 2 (Nov 2026): `GET /metrics/prometheus` emits the same counters in Prometheus text format, plus an uptime gauge (`tests/test_prometheus.py`) |
 
 ---
 
@@ -198,9 +265,9 @@ used for SSH on that port.
 - **No WAF/DPI** — AegisX enforces *who* and *whether*, not payload inspection.
 - **No Kubernetes/Helm** — Compose is enough to reproduce and review; cluster
   packaging belongs with the deployment story, not the reference implementation.
-- **No UI framework rewrite** — the dashboard is a single self-contained HTML
-  file on purpose: it must run with zero build step so a reviewer can read the
-  request flow end-to-end.
+- **No UI framework rewrite** — the dashboard is three plain files (HTML +
+  CSS + JS) on purpose: it must run with zero build step so a reviewer can
+  read the request flow end-to-end.
 
 ---
 
@@ -208,7 +275,7 @@ used for SSH on that port.
 
 ```bash
 redis-cli ping                                 # state store up
-(cd control-plane && ../.venv/bin/python -m pytest tests/ -q)   # 31 unit/integration tests
+(cd control-plane && ../.venv/bin/python -m pytest tests/ -q)   # 107 tests passing (13 Nov 2026)
 ./scripts/demo_e2e.sh                          # cloak → policy → tunnel → revoke → live-tunnel kill
 ./scripts/demo_mtls.sh                         # certificate required, CN audited
 ```

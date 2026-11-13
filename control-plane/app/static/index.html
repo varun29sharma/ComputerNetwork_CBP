@@ -9,6 +9,9 @@
 </head>
 <body>
 
+<!-- Lockdown banner: shown whenever /dashboard/state reports lockdown=true. -->
+<div id="lockdown-banner" role="alert">LOCKDOWN &mdash; all logins denied</div>
+
 <header>
   <div class="wrap nav">
     <div class="brand"><span class="brand-mark"></span> AegisX</div>
@@ -391,6 +394,36 @@
         open tunnel down within one revalidation interval &mdash; even though the user never logged out.
         Certificate-bound sessions are revoked by their certificate identity.
       </p>
+    </div>
+
+    <div class="card">
+      <p class="label">Policy as data &middot; hot reload</p>
+      <h3>Policy editor</h3>
+      <p class="endpoint">GET /admin/policy &middot; PUT /admin/policy/{app} &middot; DELETE /admin/policy/{app}</p>
+      <p class="note">Changes apply to the next login &mdash; no restart. Deleting an app denies
+        future logins for it.</p>
+      <div id="policy-list"><p class="note">Authenticate as admin to edit policy.</p></div>
+    </div>
+
+    <div class="card">
+      <p class="label">Brute-force controls</p>
+      <h3>Lockout management</h3>
+      <p class="endpoint">GET /admin/lockouts &middot; POST /admin/unlock</p>
+      <p class="note">Rate-limited IPs are in a rate-limit window &mdash; not locked out.</p>
+      <table>
+        <thead><tr><th>type</th><th>locked user / rate-limited ip</th><th>remaining</th><th></th></tr></thead>
+        <tbody id="lockout-rows"><tr><td colspan="4" class="note">Authenticate as admin.</td></tr></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <p class="label">Emergency</p>
+      <h3>Lockdown &mdash; deny all logins</h3>
+      <p class="endpoint">POST /admin/lockdown</p>
+      <p class="note">While lockdown is on, all logins are denied. The banner at the top of the
+        page shows until an admin turns it off again here.</p>
+      <div class="field"><button class="btn-ghost" id="btn-lockdown" disabled>Enable lockdown</button></div>
+      <p class="note" id="lockdown-note">Lockdown is off.</p>
     </div>
   </section>
 

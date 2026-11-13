@@ -169,3 +169,93 @@ class AppModel(BaseModel):
     name: str
     target: str
     posture_rules: Dict[str, bool] = Field(default_factory=dict)
+
+
+class PolicyRecord(BaseModel):
+    """One application's policy record, as stored (JSON) in the policy:apps
+    hash. allowed_hours "" means always allowed; otherwise "HH:MM-HH:MM".
+    session_ttl_seconds is the route + session lifetime for this app only --
+    the JWT lifetime stays the global ACCESS_TOKEN_TTL_SECONDS."""
+
+    target: str
+    posture: Dict[str, bool] = Field(default_factory=dict)
+    allowed_hours: str = ""
+    session_ttl_seconds: int = 3600
+    enabled: bool = True
+
+
+class PolicyUpdate(BaseModel):
+    """PUT /admin/policy/{app} body. Every field is optional on update (only
+    the fields sent change); `target` is required when creating a new app."""
+
+    target: Optional[str] = Field(default=None, max_length=128)
+    posture: Optional[Dict[str, bool]] = None
+    allowed_hours: Optional[str] = Field(default=None, max_length=32)
+    session_ttl_seconds: Optional[int] = None
+    enabled: Optional[bool] = None
+
+
+class PolicyListResponse(BaseModel):
+    """GET /admin/policy: the whole live policy, keyed by application name."""
+
+    apps: Dict[str, PolicyRecord] = Field(default_factory=dict)
+
+
+class DeviceRegisterRequest(BaseModel):
+    """Register a device (certificate CN) to an existing user."""
+
+    username: str = Field(..., min_length=1, max_length=64)
+    device: str = Field(..., min_length=1, max_length=64)
+
+
+class DeviceRevokeRequest(BaseModel):
+    """Revoke a device certificate (denies future logins, kills live sessions)."""
+
+    device: str = Field(..., min_length=1, max_length=64)
+
+
+class CreateUserRequest(BaseModel):
+    """Create a directory user. `device` (certificate CN) is optional."""
+
+    username: str = Field(..., min_length=1, max_length=64)
+    # 8 chars is the floor for a demo directory; a real IdP would enforce more.
+    password: str = Field(..., min_length=8, max_length=256)
+    role: str = Field(..., max_length=32)
+    apps: List[str] = Field(default_factory=list)
+    device: Optional[str] = Field(default=None, max_length=64)
+
+
+class UserResponse(BaseModel):
+    """What a created user looks like -- never includes the password hash."""
+
+    username: str
+    role: str
+    apps: List[str] = Field(default_factory=list)
+    device: str = ""
+
+
+class UnlockRequest(BaseModel):
+    """Clear a lockout: give a username, an IP, or both (at least one)."""
+
+    username: Optional[str] = Field(default=None, max_length=64)
+    ip: Optional[str] = Field(default=None, max_length=45)
+
+
+class LockdownRequest(BaseModel):
+    """Emergency lockdown switch: true stops every login, false restores it."""
+
+    on: bool
+
+
+class ServiceAccountRequest(BaseModel):
+    """Create a service account (machine identity) for one application."""
+
+    name: str = Field(..., min_length=1, max_length=64)
+    app: str = Field(..., min_length=1, max_length=64)
+
+
+class ServiceAuthRequest(BaseModel):
+    """Exchange a service account's API key for a JWT (no password login)."""
+
+    name: str = Field(..., min_length=1, max_length=64)
+    api_key: str = Field(..., min_length=1, max_length=256)

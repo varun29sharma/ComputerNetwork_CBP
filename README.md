@@ -25,6 +25,30 @@ link between the planes.
 Full version with the data flow, the Redis key schema and the two Lua scripts:
 [docs/architecture.md](docs/architecture.md).
 
+## What's new in batch 2 (Nov 2026)
+
+- **Policy-as-data + hot reload**: app policy lives in Redis (`policy:apps`),
+  edited via `GET/PUT/DELETE /admin/policy` or the dashboard policy editor —
+  the next login is judged by the new rules, no restart.
+- **Time rules + per-app TTL**: `allowed_hours` windows and
+  `session_ttl_seconds` per app (JWT lifetime unchanged).
+- **TLS on the control plane**: `./scripts/run_all.sh --tls`
+  (dedicated PDP cert, `certs/pdp.crt`); plain HTTP stays the default.
+- **Device enrollment + cert revocation**: `scripts/enroll_device.sh`,
+  `POST /admin/devices[/revoke]`; the PEP checks `cert:deny:<CN>` at
+  tunnel-open.
+- **Admin user management, lockout management, emergency lockdown**
+  (`POST /admin/lockdown` — all logins 403, all sessions revoked),
+  **audit export** (`GET /admin/audit/export?format=json|csv`),
+  **Prometheus metrics** (`GET /metrics/prometheus`), **service accounts**
+  (`POST /admin/service-accounts`, `POST /auth/service`), a
+  **dashboard-auth flag** (`AEGISX_DASHBOARD_AUTH=1`), PEP reachability in
+  the dashboard feed, and a **PEP readiness gate**
+  (`AEGISX_PEP_REQUIRE_READY=1`).
+
+The full idea list — what shipped, what was deliberately deferred, and what
+is proposed next — is in [docs/feature-ideas.md](docs/feature-ideas.md).
+
 ## Quick start
 
 **Option A — Docker** (needs Docker; brings its own Redis):
@@ -107,6 +131,9 @@ CP_PORT=8010 PEP_PORT=9011 ./scripts/demo_mtls.sh   # -> ALL MTLS CHECKS PASSED
 
 That script proves it from the same IP: no certificate → rejected at the
 handshake; alice's certificate → her app; bob's certificate → denied.
+Enroll a new device with `./scripts/enroll_device.sh <CN> <user>` (mints
+the cert and registers it); revoke one with
+`POST /admin/devices/revoke`, which also kills the device's live sessions.
 Details in [docs/design-notes.md](docs/design-notes.md).
 
 ## Tests
@@ -125,8 +152,10 @@ CI runs all three checks on every push/PR (`.github/workflows/ci.yml`).
 ## Limitations (honest)
 
 - **Demo PKI** — `certs/` is throwaway material; `ca.key` is in the clear.
-- **`/dashboard/state` is unauthenticated** by design, so the demo page works
-  with no setup. It must sit behind admin auth in any real deployment.
+- **`/dashboard/state` is unauthenticated by default**, so the demo page works
+  with no setup. Set `AEGISX_DASHBOARD_AUTH=1` and it redacts sensitive
+  fields unless the request carries an admin token. It must sit behind
+  admin auth in any real deployment.
 - **Single Redis** is a SPOF. The PEP fails closed, so an outage means a
   global lockout, not a breach — but still a lockout.
 - **Revalidation polls** every 5 s, so a revoked tunnel can live up to one
@@ -143,10 +172,10 @@ The full list, with the NIST SP 800-207 mapping and design decisions, is in
 
 | Path | What it is |
 |---|---|
-| `control-plane/app/` | FastAPI PDP: `routes_auth.py`, `routes_admin.py`, `routes_demo.py`, `routes_health.py`; `identity.py` (policy + directory), `state.py` (Redis keys + Lua) |
+| `control-plane/app/` | FastAPI PDP: `routes_auth.py`, `routes_admin.py`, `routes_policy.py`, `routes_demo.py`, `routes_health.py`; `identity.py` (policy + directory), `state.py` (Redis keys + Lua) |
 | `control-plane/app/static/` | Dashboard UI: `index.html` + `style.css` + `app.js`, served at `/` |
 | `data-plane/src/` | Netty PEP: `ZtnaProxyServer` (bootstrap) + `ZtnaAuthHandler` (the bouncer) |
 | `examples/target_service.py` | Stand-in protected app (`--hold` keeps connections open) |
-| `scripts/` | `demo_e2e.sh`, `demo_mtls.sh`, `gen_certs.sh`, `run_all.sh`, `loadtest_pep.py` |
-| `docs/` | `architecture.md`, `demo-script.md`, `design-notes.md` |
+| `scripts/` | `demo_e2e.sh`, `demo_mtls.sh`, `gen_certs.sh`, `run_all.sh`, `enroll_device.sh`, `loadtest_pep.py` |
+| `docs/` | `architecture.md`, `demo-script.md`, `design-notes.md`, `feature-ideas.md` |
 | `ROADMAP.md` | Phased plan from this demo toward production |

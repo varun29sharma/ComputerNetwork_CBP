@@ -1,4 +1,6 @@
-"""Auth routes: login (Policy Engine + Administrator), logout, verify."""
+"""Auth routes: login (Policy Engine + Administrator), logout, verify,
+service-account key exchange."""
+import hmac
 import os
 import time
 from typing import Optional
@@ -7,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from . import config, identity, security, state
 from .deps import current_identity
-from .schemas import LoginRequest, LoginResponse, RevocationResponse, VerifyResponse
+from .schemas import LoginRequest, LoginResponse, RevocationResponse, ServiceAuthRequest, VerifyResponse
 
 router = APIRouter()
 
@@ -35,6 +37,22 @@ def resolve_client_ip(request: Request, body_client_ip: Optional[str]) -> Option
     return body_client_ip or socket_ip
 
 
+async def _deny_if_lockdown(redis, subject: str, client_ip: str) -> None:
+    """Raise 403 when emergency lockdown is on (shared by both login paths:
+    a password login and a service-key exchange are both logins, so lockdown
+    stops both -- and the audit event is the same either way)."""
+    if await state.is_lockdown(redis):
+        await state.audit(
+            redis, "login.lockdown", subject=subject, client_ip=client_ip,
+            detail="logins disabled during emergency lockdown",
+        )
+        await state.incr_counter(redis, "logins:denied")
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "logins are disabled during an emergency lockdown",
+        )
+
+
 # ---------------------------------------------------------------------------
 # Policy Engine + Administrator: login
 # ---------------------------------------------------------------------------
@@ -50,13 +68,23 @@ async def login(body: LoginRequest, request: Request) -> LoginResponse:
     client_ip = resolve_client_ip(request, body.client_ip)
     if not client_ip:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "cannot determine client IP")
+
+    # Emergency lockdown is checked FIRST, before credentials: during an
+    # incident nobody logs in, and no attempt is even accounted for.
+    await _deny_if_lockdown(redis, body.username, client_ip)
+
     posture = body.posture.model_dump() if body.posture else None
     device = (body.device or "").strip() or None
 
     user = await identity.verify_credentials(redis, body.username, body.password)
 
+    # The live policy, loaded once per login so every check below judges the
+    # same rules (and so a rule edited a second ago is already in force).
+    policy = None
     app_name: Optional[str] = None
     if user is not None:
+        policy = await identity.get_policy(redis)
+
         # --- policy engine: certificate identity registration --------------
         if device and not identity.device_matches(user, device):
             await state.audit(
@@ -70,6 +98,20 @@ async def login(body: LoginRequest, request: Request) -> LoginResponse:
                 "certificate identity '{}' is not registered to this identity".format(device),
             )
 
+        # A revoked certificate is still *registered* (revocation does not
+        # erase the registration), so it passes the check above -- and is
+        # stopped here, before any route is provisioned.
+        if device and await state.is_cert_revoked(redis, device):
+            await state.audit(
+                redis, "login.device_revoked", subject=body.username,
+                client_ip=client_ip, device=device, detail="certificate revoked",
+            )
+            await state.incr_counter(redis, "logins:denied")
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "certificate '{}' has been revoked".format(device),
+            )
+
         # --- policy engine: entitlements -----------------------------------
         # Admin console identities carry no application entitlement: they can
         # administer sessions but never open a data-plane tunnel.
@@ -77,7 +119,7 @@ async def login(body: LoginRequest, request: Request) -> LoginResponse:
             app_name = None
         else:
             try:
-                app_name = identity.choose_app(user, body.app)
+                app_name = identity.choose_app(user, body.app, policy)
             except identity.PolicyError as e:
                 await state.audit(
                     redis, "login.app_denied", subject=body.username,
@@ -86,12 +128,14 @@ async def login(body: LoginRequest, request: Request) -> LoginResponse:
                 await state.incr_counter(redis, "logins:denied")
                 code = (
                     status.HTTP_404_NOT_FOUND
-                    if body.app and body.app not in identity.APP_TARGETS
+                    if body.app and body.app not in policy
                     else status.HTTP_403_FORBIDDEN
                 )
                 raise HTTPException(code, str(e))
 
-        failures = identity.evaluate_posture(app_name, posture, config.POSTURE_STRICT)
+        failures = identity.evaluate_posture(
+            app_name, posture, config.POSTURE_STRICT, policy
+        )
         if failures:
             await state.audit(
                 redis, "login.posture_denied", subject=body.username,
@@ -104,12 +148,34 @@ async def login(body: LoginRequest, request: Request) -> LoginResponse:
                 "device posture denied: {}".format("; ".join(failures)),
             )
 
-    target = identity.APP_TARGETS.get(app_name) if app_name else None
+        # --- policy engine: time window ------------------------------------
+        # Denied before the route is provisioned, like every other policy
+        # denial: a login outside the app's hours leaves no tunnel behind.
+        if app_name:
+            denial = identity.time_window_denial(policy[app_name])
+            if denial:
+                await state.audit(
+                    redis, "login.time_denied", subject=body.username,
+                    client_ip=client_ip, app=app_name, device=device, detail=denial,
+                )
+                await state.incr_counter(redis, "logins:denied")
+                raise HTTPException(status.HTTP_403_FORBIDDEN, denial)
+
+    record = policy.get(app_name) if (policy and app_name) else None
+    target = str(record["target"]) if record else None
+    # The route and session live as long as this app's policy says -- not the
+    # global default. The JWT itself is unaffected: its lifetime stays the
+    # global ACCESS_TOKEN_TTL_SECONDS, so a short app TTL never shortens the
+    # token (and a long one never extends it past exp).
+    session_ttl = (
+        int(record.get("session_ttl_seconds", config.ROUTE_TTL_SECONDS))
+        if record else config.ROUTE_TTL_SECONDS
+    )
     binding = state.binding(client_ip, device)
 
     # Atomic gate: lockout + per-user/per-IP rate limits + route provisioning.
     allowed, _attempts, retry_ms, reason = await state.login_gate(
-        redis, body.username, client_ip, target, binding
+        redis, body.username, client_ip, target, binding, ttl=session_ttl
     )
     if not allowed:
         await state.audit(
@@ -152,7 +218,7 @@ async def login(body: LoginRequest, request: Request) -> LoginResponse:
                 "client_ip": client_ip,
                 "device": device or "",
             },
-            config.ROUTE_TTL_SECONDS,
+            session_ttl,
         )
     await state.incr_counter(redis, "logins:ok")
     await state.audit(
@@ -162,7 +228,7 @@ async def login(body: LoginRequest, request: Request) -> LoginResponse:
     if target:
         await state.audit(
             redis, "tunnel.provisioned", subject=body.username, client_ip=client_ip,
-            app=app_name, target=target, ttl=config.ROUTE_TTL_SECONDS,
+            app=app_name, target=target, ttl=session_ttl,
             device=device, binding=binding,
         )
     return LoginResponse(
@@ -174,6 +240,81 @@ async def login(body: LoginRequest, request: Request) -> LoginResponse:
         posture="pass",
         binding=binding if target else "",
         device=device or "",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Service accounts: API-key exchange for machine identities
+# ---------------------------------------------------------------------------
+@router.post("/auth/service", response_model=LoginResponse)
+async def service_login(body: ServiceAuthRequest, request: Request) -> LoginResponse:
+    """Exchange a service account's API key for a JWT (role=service).
+
+    No password login: the key is compared by hash (constant-time), and the
+    token is good for exactly the one app the account was created for. The
+    session gets a route like a normal login, bound to the source address.
+    """
+    redis = request.app.state.redis
+    client_ip = resolve_client_ip(request, None)
+    if not client_ip:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "cannot determine client IP")
+    await _deny_if_lockdown(redis, body.name, client_ip)
+
+    record = await redis.hgetall(identity.service_key(body.name))
+    if not record or not hmac.compare_digest(
+        record.get("key_hash", ""), identity.hash_api_key(body.api_key)
+    ):
+        await state.audit(
+            redis, "login.invalid_credentials", subject=body.name, client_ip=client_ip,
+        )
+        await state.incr_counter(redis, "logins:denied")
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid service credentials")
+
+    policy = await identity.get_policy(redis)
+    app_name = record.get("app", "")
+    app_record = policy.get(app_name)
+    if app_record is None or not app_record.get("enabled", True):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "application unavailable: {}".format(app_name)
+        )
+    denial = identity.time_window_denial(app_record)
+    if denial:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, denial)
+
+    target = str(app_record["target"])
+    session_ttl = int(app_record.get("session_ttl_seconds", config.ROUTE_TTL_SECONDS))
+    binding = state.binding(client_ip)
+    allowed, _attempts, retry_ms, reason = await state.login_gate(
+        redis, "svc:{}".format(body.name), client_ip, target, binding, ttl=session_ttl
+    )
+    if not allowed:
+        retry_after = {"Retry-After": str(max(1, retry_ms // 1000))}
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS, "too many login attempts", headers=retry_after
+        )
+
+    token = security.mint_token(body.name, "service", client_ip, binding=binding)
+    claims = security.decode_token(token)
+    await state.set_session(
+        redis, binding,
+        {"user": body.name, "role": "service", "app": app_name, "target": target,
+         "jti": claims["jti"], "client_ip": client_ip, "device": ""},
+        session_ttl,
+    )
+    await state.incr_counter(redis, "logins:ok")
+    await state.audit(
+        redis, "login.success", subject=body.name, client_ip=client_ip,
+        app=app_name, role="service",
+    )
+    return LoginResponse(
+        access_token=token,
+        expires_in=config.ACCESS_TOKEN_TTL_SECONDS,
+        app=app_name,
+        target=target,
+        route_key=state.route_key(binding),
+        posture="pass",
+        binding=binding,
+        device="",
     )
 
 

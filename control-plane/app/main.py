@@ -34,6 +34,7 @@ from .routes_admin import router as admin_router
 from .routes_auth import router as auth_router
 from .routes_demo import router as demo_router
 from .routes_health import router as health_router
+from .routes_policy import router as policy_router
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -52,6 +53,7 @@ app.include_router(auth_router)
 app.include_router(admin_router)
 app.include_router(demo_router)
 app.include_router(health_router)
+app.include_router(policy_router)
 
 # The dashboard is three plain files (index.html + style.css + app.js); the
 # page routes below serve the HTML, this mount serves the CSS and JS.

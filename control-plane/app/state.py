@@ -15,6 +15,11 @@ fails:<u>           -> consecutive failed logins (drives lockout).
 lock:<u>            -> account locked after LOGIN_FAIL_MAX consecutive failures.
 audit:events        -> Redis Stream: every allow/deny/login/logout/admin action.
 pep:allow|deny|active|closed -> data-plane counters (written by the Netty PEP).
+policy:apps         -> hash {app name: JSON policy record} (policy-as-data).
+policy:seeded       -> marker set once the seed policy has been written.
+cert:deny:<CN>      -> revoked device certificate (24h TTL; see revoke_cert).
+admin:lockdown      -> "1" while emergency lockdown is on (absent == off).
+svc:<name>          -> service-account hash {key_hash, app}.
 """
 import time
 from typing import Dict, List, Optional
@@ -131,6 +136,40 @@ def lock_key(username: str) -> str:
     return "lock:{}".format(username[:64])
 
 
+# Emergency lockdown flag: the key exists ("1") while lockdown is on and is
+# deleted when it is switched off, so "absent" always means "normal".
+LOCKDOWN_KEY = "admin:lockdown"
+
+# A revoked certificate stays denied for 24h. That is a demo TTL, not a real
+# CRL: a production deployment needs a persistent revocation list, because a
+# 24h entry expires and the certificate would work again after it.
+CERT_DENY_TTL_SECONDS = 86400
+
+
+def cert_deny_key(device: str) -> str:
+    return "cert:deny:{}".format(device)
+
+
+async def is_lockdown(redis: aioredis.Redis) -> bool:
+    return bool(await redis.exists(LOCKDOWN_KEY))
+
+
+async def set_lockdown(redis: aioredis.Redis, on: bool) -> None:
+    if on:
+        await redis.set(LOCKDOWN_KEY, "1")
+    else:
+        await redis.delete(LOCKDOWN_KEY)
+
+
+async def revoke_cert(redis: aioredis.Redis, device: str) -> None:
+    """Deny one certificate CN (the PEP checks this key at tunnel-open time)."""
+    await redis.set(cert_deny_key(device), "1", ex=CERT_DENY_TTL_SECONDS)
+
+
+async def is_cert_revoked(redis: aioredis.Redis, device: str) -> bool:
+    return bool(await redis.exists(cert_deny_key(device)))
+
+
 # decode_responses=True: keys and values come back as str, not bytes, so
 # the rest of the code never has to decode Redis replies by hand.
 async def connect() -> aioredis.Redis:
@@ -203,13 +242,15 @@ async def list_sessions(redis: aioredis.Redis) -> List[Dict[str, object]]:
 # ---------------------------------------------------------------------------
 async def login_gate(
     redis: aioredis.Redis, username: str, client_ip: str, target: str,
-    binding_name: Optional[str] = None,
+    binding_name: Optional[str] = None, ttl: Optional[int] = None,
 ):
     """Atomically account for this login attempt and provision the route.
 
     Returns (allowed, attempts, retry_after_ms, reason). The route (KEYS[2]) is
     keyed by the session's binding -- "device:<cert CN>" for certificate-bound
-    sessions, otherwise the source address.
+    sessions, otherwise the source address. `ttl` is the route lifetime: the
+    app's session_ttl_seconds when the login is for an app, else the global
+    ROUTE_TTL_SECONDS default.
     """
     result = await redis.eval(
         LOGIN_LUA,
@@ -222,7 +263,7 @@ async def login_gate(
         str(config.RATE_LIMIT_WINDOW_SECONDS),
         str(config.RATE_LIMIT_MAX_ATTEMPTS),
         target or "",
-        str(config.ROUTE_TTL_SECONDS),
+        str(ttl if ttl is not None else config.ROUTE_TTL_SECONDS),
         str(config.RATE_LIMIT_WINDOW_SECONDS),
         str(config.RATE_LIMIT_IP_MAX_ATTEMPTS),
         str(config.LOGIN_FAIL_MAX),
@@ -242,6 +283,27 @@ async def revoke(redis: aioredis.Redis, jti: str, binding_name: str, remaining_t
         session_key(binding_name),
         str(max(1, remaining_ttl)),
     )
+
+
+async def revoke_binding(redis: aioredis.Redis, binding_name: str) -> bool:
+    """Revoke one live session by its binding (the admin bulk-revoke path).
+
+    Looks the session record up itself, so callers that only know a device or
+    a username never need the victim's token. A route with no session record
+    (no jti to denylist) still has its keys deleted. Returns True when
+    anything was actually revoked.
+    """
+    sess = await redis.hgetall(session_key(binding_name))
+    route_exists = await redis.exists(route_key(binding_name))
+    if not sess and not route_exists:
+        return False
+    jti = sess.get("jti", "")
+    if jti:
+        remaining = max(1, await redis.ttl(route_key(binding_name)))
+        await revoke(redis, jti, binding_name, remaining)
+    else:
+        await redis.delete(route_key(binding_name), session_key(binding_name))
+    return True
 
 
 async def is_denied(redis: aioredis.Redis, jti: str) -> bool:

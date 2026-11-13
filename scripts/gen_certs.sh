@@ -4,6 +4,7 @@
 #
 #   certs/ca.crt, certs/ca.key          -- demo certificate authority
 #   certs/pep.crt, certs/pep.key        -- PEP server certificate
+#   certs/pdp.crt, certs/pdp.key        -- control-plane (PDP) server certificate
 #   certs/alice.crt, certs/alice.key    -- per-identity client certificates
 #   certs/bob.crt, certs/bob.key
 #
@@ -27,15 +28,21 @@ rm -rf "$OUT"
 mkdir -p "$OUT"
 cd "$OUT"
 
-echo "[1/4] certificate authority"
+echo "[1/5] certificate authority"
 openssl req -x509 -newkey rsa:2048 -nodes -keyout ca.key -out ca.crt -days "$DAYS" \
   -subj "/CN=AegisX Demo CA/O=AegisX" >/dev/null 2>&1
 
 gen_leaf() {
   local name="$1"
+  # The PDP certificate is presented to browsers/curl as "localhost", so its
+  # CN names the host; the PEP and client certs are named by identity instead.
+  local cn="$name"
+  [ "$name" = "pdp" ] && cn="localhost"
   openssl req -newkey rsa:2048 -nodes -keyout "$name.key" -out "$name.csr" \
-    -subj "/CN=$name/O=AegisX" >/dev/null 2>&1
-  if [ "$name" = "pep" ]; then
+    -subj "/CN=$cn/O=AegisX" >/dev/null 2>&1
+  # Server certificates (PEP and PDP) need serverAuth + SANs so a client can
+  # verify the hostname it connected to; client certs need clientAuth only.
+  if [ "$name" = "pep" ] || [ "$name" = "pdp" ]; then
     cat > "$name.ext" <<'EOF'
 basicConstraints=CA:FALSE
 keyUsage=digitalSignature,keyEncipherment
@@ -54,13 +61,15 @@ EOF
   rm -f "$name.csr" "$name.ext"
 }
 
-echo "[2/4] PEP server certificate (SAN: localhost, 127.0.0.1)"
+echo "[2/5] PEP server certificate (SAN: localhost, 127.0.0.1)"
 gen_leaf pep
-echo "[3/4] client certificates"
+echo "[3/5] PDP server certificate (SAN: localhost, 127.0.0.1)"
+gen_leaf pdp
+echo "[4/5] client certificates"
 gen_leaf alice
 gen_leaf bob
-echo "[4/4] verifying the chain"
-openssl verify -CAfile ca.crt pep.crt alice.crt bob.crt
+echo "[5/5] verifying the chain"
+openssl verify -CAfile ca.crt pep.crt pdp.crt alice.crt bob.crt
 chmod 600 ./*.key
 
 echo
@@ -68,5 +77,6 @@ echo "PKI written to $OUT"
 echo "  start the PEP with:  AEGISX_MTLS=1 AEGISX_MTLS_CERT=$OUT/pep.crt \\"
 echo "                       AEGISX_MTLS_KEY=$OUT/pep.key AEGISX_MTLS_CA=$OUT/ca.crt \\"
 echo "                       java -jar data-plane/target/aegisx-ztna-proxy.jar"
+echo "  start the PDP with TLS: ./scripts/run_all.sh --tls"
 echo "  connect as alice:    openssl s_client -quiet -connect 127.0.0.1:9000 \\"
 echo "                       -cert $OUT/alice.crt -key $OUT/alice.key -CAfile $OUT/ca.crt"

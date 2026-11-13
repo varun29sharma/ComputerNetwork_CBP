@@ -5,8 +5,9 @@ import asyncio
 import os
 import re
 import ssl
+import time
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
@@ -25,13 +26,15 @@ router = APIRouter()
 _CERT_NAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 
 
-def _app_row(name: str, target: str) -> dict:
+def _app_row(name: str, target: str, posture: Optional[dict] = None) -> dict:
     # One shared shape for the protected-estate listing, used by /apps,
     # /admin/apps and /dashboard/state so the three can never disagree.
+    # Callers pass the LIVE policy record's posture; the seed constants are
+    # only the fallback for callers that have no policy loaded.
     return {
         "name": name,
         "target": target,
-        "posture_rules": identity.POSTURE_RULES.get(name, {}),
+        "posture_rules": posture if posture is not None else identity.POSTURE_RULES.get(name, {}),
     }
 
 
@@ -48,9 +51,14 @@ async def metrics(request: Request) -> dict:
 
 
 @router.get("/apps")
-async def apps() -> List[dict]:
-    """Public (demo) description of the protected estate, used by the UI."""
-    return [_app_row(name, target) for name, target in identity.APP_TARGETS.items()]
+async def apps(request: Request) -> List[dict]:
+    """Public (demo) description of the protected estate, used by the UI.
+    Reads the LIVE policy, so an admin PUT is reflected here immediately."""
+    policy = await identity.get_policy(request.app.state.redis)
+    return [
+        _app_row(name, str(record["target"]), dict(record.get("posture") or {}))
+        for name, record in policy.items()
+    ]
 
 
 def _cert_paths(name: str) -> tuple:
@@ -174,9 +182,10 @@ def _delivered_port(payload: str) -> int:
     return int(match.group(1)) if match else 0
 
 
-def _app_for_port(port: int) -> str:
-    for name, target in identity.APP_TARGETS.items():
-        if target.rpartition(":")[2] == str(port):
+def _app_for_port(port: int, policy: dict) -> str:
+    """Which app (in the live policy) listens on this port, if any."""
+    for name, record in policy.items():
+        if str(record.get("target", "")).rpartition(":")[2] == str(port):
             return name
     return ""
 
@@ -211,7 +220,10 @@ async def demo_attempt(
 
     user = await identity.get_user(redis, identity_name)
     entitled = list(user.get("apps") or []) if user else []
-    requested_target = identity.APP_TARGETS.get(requested, "")
+    # The trace judges the LIVE policy, like a real login does -- not the
+    # seed defaults, which an admin PUT may have changed since startup.
+    policy = await identity.get_policy(redis)
+    requested_target = str(policy.get(requested, {}).get("target", ""))
 
     # --- gate 1: policy engine (entitlement) ------------------------------
     decision = "ALLOW"
@@ -222,7 +234,7 @@ async def demo_attempt(
         reason = "identity no longer exists in the directory"
     else:
         try:
-            app_name = identity.choose_app(user, requested)
+            app_name = identity.choose_app(user, requested, policy)
         except identity.PolicyError as e:
             decision, decided_by, reason = "DENY", "policy-engine", str(e)
             app_name = ""
@@ -295,7 +307,7 @@ async def demo_attempt(
         else:
             wire = "ok"
             delivered_port = _delivered_port(gateway.payload or gateway.detail)
-            delivered_app = _app_for_port(delivered_port)
+            delivered_app = _app_for_port(delivered_port, policy)
             detail = "{} answered{}".format(
                 ("{} :{}".format(delivered_app, delivered_port)) if delivered_port
                 else "the protected application",
@@ -325,11 +337,80 @@ async def demo_attempt(
 # ---------------------------------------------------------------------------
 # Dashboard
 # ---------------------------------------------------------------------------
+# How long the dashboard may wait for the PEP to answer a TCP connect. A dead
+# PEP must never make the dashboard feed hang -- 0.3s is plenty on localhost
+# and bounds the worst case for a remote PEP too.
+PEP_PROBE_TIMEOUT_SECONDS = 0.3
+
+
+async def _pep_reachable() -> Tuple[bool, Optional[float]]:
+    """Is the data plane alive, and how fast did it answer the TCP connect?
+
+    A plain connect (no payload): the PEP cloaks unauthorized sources, so
+    sending bytes here would prove nothing -- reachability is all the
+    dashboard needs. Any failure or timeout means unreachable, never an error.
+    """
+    host, _, port_s = config.PEP_PROBE_ADDR.rpartition(":")
+    try:
+        port = int(port_s)
+    except ValueError:
+        return False, None
+    started = time.monotonic()
+    try:
+        _, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, port), timeout=PEP_PROBE_TIMEOUT_SECONDS
+        )
+    except (asyncio.TimeoutError, OSError):
+        return False, None
+    latency_ms = round((time.monotonic() - started) * 1000, 1)
+    writer.close()
+    return True, latency_ms
+
+
+async def _is_admin_request(request: Request) -> bool:
+    """True only when the request carries a valid, non-revoked ADMIN token.
+
+    Reuses current_identity -- the same signature/expiry + denylist check
+    every protected route uses -- so the dashboard gate can never drift from
+    the real auth path. A failure here means "redacted view", not an error,
+    so the 401/403 is swallowed and reported as False.
+    """
+    try:
+        claims = await current_identity(request, request.headers.get("authorization"))
+    except HTTPException:
+        return False
+    return claims.get("role") == "admin"
+
+
 @router.get("/dashboard/state")
 async def dashboard_state(request: Request) -> dict:
-    """Demo-only live feed (unauthenticated on purpose -- see README security
-    notes; production gates this behind admin auth)."""
+    """Demo-only live feed. Unauthenticated by default (see README security
+    notes); with AEGISX_DASHBOARD_AUTH=1 it shows only the public fields
+    unless the request carries a valid admin token -- a 200 redacted view,
+    never an error, so the dashboard still loads for anonymous viewers."""
     redis = request.app.state.redis
+
+    # Decide the view first: a redacted request skips the Redis scans for
+    # sessions/routes/audit entirely instead of fetching them and throwing
+    # them away.
+    full_view = not config.DASHBOARD_AUTH or await _is_admin_request(request)
+    reachable, latency_ms = await _pep_reachable()
+    policy = await identity.get_policy(redis)
+    public = {
+        "metrics": await state.metrics(redis),
+        "apps": [
+            _app_row(name, str(record["target"]), dict(record.get("posture") or {}))
+            for name, record in policy.items()
+        ],
+        "pep_reachable": reachable,
+        "pep_latency_ms": latency_ms,
+        "posture_strict": config.POSTURE_STRICT,
+        "route_ttl": config.ROUTE_TTL_SECONDS,
+        "certs": _available_certs(),
+        "pep_addr": config.PEP_PROBE_ADDR,
+    }
+    if not full_view:
+        return public
 
     routes: List[dict] = []
     async for key in redis.scan_iter(match="route:*"):
@@ -374,17 +455,16 @@ async def dashboard_state(request: Request) -> dict:
         )
 
     return {
+        **public,
         "routes": routes,
         "denylisted": denylisted,
         "rate_limits": rate_limits,
         "sessions": await state.list_sessions(redis),
         "lockouts": lockouts,
         "audit": await state.recent_audit(redis, 40),
-        "metrics": await state.metrics(redis),
-        "apps": [_app_row(name, target) for name, target in identity.APP_TARGETS.items()],
         "users": identity.directory_summary(),
-        "certs": _available_certs(),
-        "pep_addr": config.PEP_PROBE_ADDR,
-        "posture_strict": config.POSTURE_STRICT,
-        "route_ttl": config.ROUTE_TTL_SECONDS,
+        # The dashboard banner reads this: True while emergency lockdown is on.
+        # It lives in the full view, not the public one, so the redacted feed
+        # (DASHBOARD_AUTH=1, no admin token) keeps its exact key set.
+        "lockdown": await state.is_lockdown(redis),
     }
