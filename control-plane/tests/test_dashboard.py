@@ -1,15 +1,13 @@
 """Dashboard endpoint tests: the UI page and its live state feed."""
-import re
 import shutil
 import subprocess
-import tempfile
 from pathlib import Path
 
 import pytest
 
 ALICE_PW = "alice-dev-pw"
 CLIENT_IP = "198.51.100.7"
-INDEX = Path(__file__).resolve().parents[1] / "app" / "static" / "index.html"
+APP_JS = Path(__file__).resolve().parents[1] / "app" / "static" / "app.js"
 
 
 def login(client, username="alice", password=ALICE_PW, client_ip=CLIENT_IP):
@@ -35,23 +33,15 @@ def test_dashboard_alias_serves_the_same_page(client):
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
-def test_dashboard_inline_javascript_parses():
-    """The page is one self-contained file, so a JavaScript syntax error breaks
-    every interaction while the HTML still serves fine -- markers alone would
-    not notice. Parse the inline script for real."""
-    html = INDEX.read_text()
-    scripts = re.findall(r"<script>(.*?)</script>", html, re.S)
-    assert scripts, "no inline script found in the dashboard"
-    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as handle:
-        handle.write("\n".join(scripts))
-        path = handle.name
-    try:
-        result = subprocess.run(
-            [shutil.which("node"), "--check", path], capture_output=True, text=True
-        )
-        assert result.returncode == 0, result.stderr
-    finally:
-        Path(path).unlink(missing_ok=True)
+def test_dashboard_javascript_parses():
+    """The dashboard JS lives in app.js (split out of index.html in the UI
+    rebuild), so a JavaScript syntax error breaks every interaction while the
+    HTML still serves fine -- markers alone would not notice. Parse it for real."""
+    assert APP_JS.exists(), "app.js missing -- the dashboard split is incomplete"
+    result = subprocess.run(
+        [shutil.which("node"), "--check", str(APP_JS)], capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_dashboard_exposes_the_device_binding_controls(client):

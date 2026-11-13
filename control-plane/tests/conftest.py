@@ -9,6 +9,11 @@ import os
 
 os.environ.setdefault("AEGISX_REDIS_URL", "redis://127.0.0.1:6379")
 os.environ.setdefault("AEGISX_JWT_SECRET", "test-secret-0123456789abcdef0123456789abcdef")
+# Tests log in with a client_ip in the JSON body while TestClient connects
+# from "testclient": that only works with the trusted-proxy fallback on, so
+# the suite simulates a trusted proxy by default (test_trust_proxy.py covers
+# the default-off behaviour explicitly with monkeypatch).
+os.environ.setdefault("AEGISX_TRUST_PROXY", "1")
 
 import pytest
 import redis as sync_redis

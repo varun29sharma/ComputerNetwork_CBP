@@ -4,305 +4,15 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>AegisX — Identity-Aware Zero Trust Gateway</title>
-<style>
-  :root {
-    --bg: #05060a;
-    --surface: rgba(255, 255, 255, 0.028);
-    --surface-strong: rgba(255, 255, 255, 0.05);
-    --border: rgba(255, 255, 255, 0.08);
-    --border-strong: rgba(255, 255, 255, 0.14);
-    --text: #e9ebf2;
-    --text-dim: #9aa1b4;
-    --text-faint: #5c6377;
-    --lime: #adfa1e;
-    --cyan: #4fd1ff;
-    --amber: #ffb020;
-    --red: #ff4d5e;
-    --blue-deep: #112069;
-    --blue-mid: #1f3ca3;
-    --radius: 18px;
-    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
-  }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  html { scroll-behavior: smooth; }
-  body {
-    background: var(--bg);
-    color: var(--text);
-    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    line-height: 1.55;
-    -webkit-font-smoothing: antialiased;
-    overflow-x: hidden;
-  }
-  body::after {
-    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 50; opacity: 0.035;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
-  }
-  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 28px; }
-
-  header {
-    position: sticky; top: 0; z-index: 40;
-    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
-    background: rgba(5, 6, 10, 0.72);
-    border-bottom: 1px solid var(--border);
-  }
-  .nav { display: flex; align-items: center; justify-content: space-between; height: 64px; }
-  .brand { display: flex; align-items: center; gap: 12px; font-weight: 700; letter-spacing: 0.02em; font-size: 17px; }
-  .brand-mark {
-    width: 26px; height: 26px; border-radius: 8px; position: relative;
-    background: linear-gradient(135deg, var(--lime), #367c66 70%);
-    box-shadow: 0 0 18px rgba(173, 250, 30, 0.35);
-  }
-  .brand-mark::after { content: ""; position: absolute; inset: 7px 9px; border: 2px solid #05060a; border-radius: 3px; }
-  .badge {
-    font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
-    color: var(--text-dim); border: 1px solid var(--border); border-radius: 999px;
-    padding: 4px 10px; background: var(--surface);
-  }
-  nav a { color: var(--text-dim); text-decoration: none; font-size: 13.5px; margin-left: 22px; transition: color .15s; }
-  nav a:hover { color: var(--text); }
-
-  .hero { position: relative; padding: 96px 0 72px; overflow: hidden; }
-  .blob { position: absolute; border-radius: 50%; filter: blur(90px); opacity: .5; pointer-events: none; }
-  .blob-a { width: 620px; height: 620px; top: -260px; left: -140px;
-    background: radial-gradient(circle at 30% 30%, var(--blue-mid), transparent 65%);
-    animation: drift-a 26s ease-in-out infinite alternate; }
-  .blob-b { width: 520px; height: 520px; top: -160px; right: -120px;
-    background: radial-gradient(circle at 60% 40%, rgba(173,250,30,.32), transparent 62%);
-    animation: drift-b 32s ease-in-out infinite alternate; }
-  .blob-c { width: 420px; height: 420px; top: 120px; left: 42%;
-    background: radial-gradient(circle at 50% 50%, rgba(237,64,179,.16), transparent 60%);
-    animation: drift-a 38s ease-in-out infinite alternate-reverse; }
-  @keyframes drift-a { from { transform: translate(0, 0) scale(1); } to { transform: translate(90px, 60px) scale(1.15); } }
-  @keyframes drift-b { from { transform: translate(0, 0) scale(1.1); } to { transform: translate(-70px, 90px) scale(0.95); } }
-  .hero-inner { position: relative; z-index: 2; }
-  .kicker { display: inline-flex; align-items: center; gap: 8px; margin-bottom: 26px; }
-  .kicker .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--lime); box-shadow: 0 0 12px var(--lime); }
-  h1 { font-size: clamp(42px, 6.4vw, 78px); line-height: 1.03; font-weight: 780; letter-spacing: -0.035em; max-width: 15ch; }
-  h1 .grad { background: linear-gradient(100deg, var(--lime) 10%, var(--cyan) 90%); -webkit-background-clip: text; background-clip: text; color: transparent; }
-  .hero p.sub { margin-top: 24px; max-width: 58ch; color: var(--text-dim); font-size: 17px; }
-  .hero .pills { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 34px; }
-  .pill {
-    font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.05em;
-    border: 1px solid var(--border); background: var(--surface); color: var(--text-dim);
-    border-radius: 999px; padding: 7px 14px;
-  }
-  .pill b { color: var(--text); font-weight: 600; }
-
-  section { padding: 60px 0; }
-  .sec-head { display: flex; align-items: baseline; gap: 16px; margin-bottom: 30px; }
-  .sec-head h2 { font-size: 27px; font-weight: 720; letter-spacing: -0.02em; }
-  .sec-head span { color: var(--text-faint); font-size: 13.5px; }
-
-  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
-  .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
-  .card {
-    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-    padding: 26px; transition: border-color .2s, transform .2s;
-  }
-  .card:hover { border-color: var(--border-strong); transform: translateY(-2px); }
-  .card .tag { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.13em; text-transform: uppercase; color: var(--text-faint); }
-  .card h3 { font-size: 17.5px; margin: 10px 0 8px; font-weight: 660; }
-  .card p { color: var(--text-dim); font-size: 14px; }
-  .card .stack { margin-top: 14px; font-family: var(--mono); font-size: 11.5px; color: var(--cyan); }
-
-  .vs { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
-  .vs ul { list-style: none; margin-top: 12px; }
-  .vs li { color: var(--text-dim); font-size: 14px; padding: 7px 0; border-top: 1px solid var(--border); display: flex; gap: 10px; }
-  .vs li::before { font-family: var(--mono); flex: none; }
-  .bad li::before { content: "✗"; color: var(--red); }
-  .good li::before { content: "✓"; color: var(--lime); }
-
-  .flow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
-  .step { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 22px; position: relative; }
-  .step .n {
-    width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center;
-    font-family: var(--mono); font-size: 13px; color: var(--bg); font-weight: 700;
-    background: linear-gradient(135deg, var(--lime), #367c66); margin-bottom: 14px;
-  }
-  .step h4 { font-size: 14.5px; font-weight: 640; margin-bottom: 6px; }
-  .step p { font-size: 13px; color: var(--text-dim); }
-  .step code { font-family: var(--mono); font-size: 11.5px; color: var(--cyan); }
-
-  .bento { display: grid; grid-template-columns: 1.05fr 0.95fr; gap: 16px; }
-  .bento .full { grid-column: 1 / -1; }
-  .card.live { background: linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.015)); }
-  label { display: block; font-size: 12px; color: var(--text-faint); font-family: var(--mono); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 7px; }
-  input, select {
-    width: 100%; background: rgba(0, 0, 0, 0.35); border: 1px solid var(--border);
-    border-radius: 11px; padding: 11px 14px; color: var(--text); font-size: 14px;
-    font-family: var(--mono); outline: none; transition: border-color .15s;
-  }
-  input:focus, select:focus { border-color: rgba(173, 250, 30, 0.55); }
-  .field { margin-bottom: 14px; }
-  .row { display: flex; gap: 10px; }
-  .row > * { flex: 1; }
-  button {
-    cursor: pointer; border: none; border-radius: 11px; padding: 12px 20px;
-    font-size: 14px; font-weight: 650; font-family: inherit; transition: transform .1s, opacity .15s, box-shadow .2s;
-  }
-  button:active { transform: scale(0.98); }
-  button:disabled { opacity: 0.35; cursor: not-allowed; }
-  .btn-primary { background: var(--lime); color: #0a0f02; width: 100%; }
-  .btn-primary:not(:disabled):hover { box-shadow: 0 0 28px rgba(173, 250, 30, 0.35); }
-  .btn-ghost { background: transparent; border: 1px solid var(--border-strong); color: var(--text); width: 100%; }
-  .btn-ghost:not(:disabled):hover { border-color: var(--red); color: var(--red); }
-  .btn-mini {
-    background: transparent; border: 1px solid rgba(255, 77, 94, 0.5); color: var(--red);
-    padding: 5px 11px; font-size: 11.5px; border-radius: 8px; font-family: var(--mono); width: auto;
-  }
-  .btn-mini:hover { background: rgba(255, 77, 94, 0.12); }
-  .toggle { display: flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: 12px; color: var(--text-dim); }
-  .toggle input { width: 16px; height: 16px; accent-color: var(--lime); }
-
-  .gateway { text-align: center; padding: 30px 26px; }
-  .gw-icon {
-    width: 74px; height: 74px; margin: 0 auto 18px; border-radius: 22px;
-    display: grid; place-items: center; font-size: 30px;
-    border: 1px solid var(--border); background: var(--surface-strong);
-    transition: all .45s cubic-bezier(.2, .9, .3, 1.2);
-  }
-  .gw-state { font-family: var(--mono); font-size: 22px; letter-spacing: 0.22em; font-weight: 700; }
-  .gw-desc { color: var(--text-dim); font-size: 13.5px; margin-top: 10px; min-height: 40px; }
-  .cloaked .gw-icon { color: var(--red); box-shadow: 0 0 0 1px rgba(255, 77, 94, 0.25); }
-  .cloaked .gw-state { color: var(--red); }
-  .open .gw-icon { color: var(--lime); box-shadow: 0 0 44px rgba(173, 250, 30, 0.25), 0 0 0 1px rgba(173, 250, 30, 0.35); }
-  .open .gw-state { color: var(--lime); }
-  .probe-result { margin-top: 16px; border-radius: 12px; padding: 14px 16px; font-size: 13px;
-    font-family: var(--mono); text-align: left; display: none; animation: rise .3s ease; }
-  @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-  .probe-allow { display: block; background: rgba(173, 250, 30, 0.07); border: 1px solid rgba(173, 250, 30, 0.3); color: var(--lime); }
-  .probe-deny { display: block; background: rgba(255, 77, 94, 0.07); border: 1px solid rgba(255, 77, 94, 0.3); color: var(--red); }
-  .probe-result small { display: block; color: var(--text-dim); margin-top: 6px; font-size: 12px; }
-
-  .jwt .claims { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; font-family: var(--mono); font-size: 12.5px; }
-  .jwt .claims dt { color: var(--text-faint); }
-  .jwt .claims dd { color: var(--cyan); word-break: break-all; }
-  .jwt .raw { margin-top: 14px; font-family: var(--mono); font-size: 10.5px; color: var(--text-faint); word-break: break-all; line-height: 1.6; }
-  .empty-note { color: var(--text-faint); font-size: 13.5px; font-style: italic; }
-
-  table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 12.5px; }
-  th { text-align: left; color: var(--text-faint); font-weight: 500; font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase; padding: 8px 10px; border-bottom: 1px solid var(--border); }
-  td { padding: 9px 10px; border-bottom: 1px solid var(--border); color: var(--text-dim); }
-  td.k { color: var(--text); }
-  td.v { color: var(--lime); }
-  .ttlbar { height: 5px; border-radius: 3px; background: rgba(255,255,255,0.07); overflow: hidden; min-width: 90px; }
-  .ttlbar i { display: block; height: 100%; border-radius: 3px; background: linear-gradient(90deg, #367c66, var(--lime)); transition: width 1s linear; }
-  .stat-row { display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
-  .stat { flex: 1; min-width: 128px; border: 1px solid var(--border); border-radius: 13px; padding: 13px 16px; background: rgba(0, 0, 0, 0.25); }
-  .stat .num { font-size: 22px; font-weight: 700; font-family: var(--mono); }
-  .stat .lbl { font-size: 10.5px; color: var(--text-faint); font-family: var(--mono); letter-spacing: 0.1em; text-transform: uppercase; }
-  .stat.ok .num { color: var(--lime); }
-  .stat.bad .num { color: var(--red); }
-  .stat.warn .num { color: var(--amber); }
-  .stat.info .num { color: var(--cyan); }
-  .subhead { font-family: var(--mono); font-size: 11px; letter-spacing: 0.13em; text-transform: uppercase; color: var(--text-faint); margin: 22px 0 10px; }
-
-  .log { font-family: var(--mono); font-size: 12px; max-height: 260px; overflow-y: auto; }
-  .log-line { display: flex; gap: 14px; padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,0.04); animation: rise .25s ease; }
-  .log-line time { color: var(--text-faint); flex: none; }
-  .log-line .ok { color: var(--lime); }
-  .log-line .err { color: var(--red); }
-  .log-line .info { color: var(--cyan); }
-  .log-line .warn { color: var(--amber); }
-  .audit-line { display: grid; grid-template-columns: 74px 1fr auto; gap: 12px; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.04); font-family: var(--mono); font-size: 12px; }
-  .audit-line .ev { color: var(--text); }
-  .audit-line .meta { color: var(--text-faint); text-align: right; }
-  .ev-ok { color: var(--lime); }
-  .ev-deny { color: var(--red); }
-  .ev-info { color: var(--cyan); }
-  .ev-warn { color: var(--amber); }
-  .legend { display: flex; gap: 16px; flex-wrap: wrap; font-family: var(--mono); font-size: 11px; color: var(--text-faint); margin-bottom: 12px; }
-  .chip { border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; }
-
-  #toasts { position: fixed; bottom: 26px; right: 26px; z-index: 60; display: flex; flex-direction: column; gap: 10px; }
-  .toast {
-    background: rgba(12, 14, 22, 0.92); border: 1px solid var(--border-strong); border-radius: 13px;
-    padding: 13px 18px; font-size: 13.5px; backdrop-filter: blur(10px); animation: rise .25s ease;
-    max-width: 360px; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
-  }
-  .toast.ok { border-color: rgba(173, 250, 30, 0.4); }
-  .toast.err { border-color: rgba(255, 77, 94, 0.45); }
-
-  /* ---------- ZTNA flow visualization ---------- */
-  #flowviz { width: 100%; height: auto; display: block; overflow: visible; }
-  .seg { fill: none; stroke: rgba(255, 255, 255, 0.15); stroke-width: 2.5;
-         stroke-linecap: round; transition: stroke .25s ease; }
-  .seg.live { stroke: url(#gseg); filter: url(#glow); }
-  .seg.dead { stroke: var(--red); stroke-dasharray: 8 8; opacity: .8; }
-  .seg-l { fill: var(--text-faint); font: 500 10px "SF Mono", ui-monospace, Menlo, monospace;
-           letter-spacing: .08em; text-transform: uppercase; }
-  .seg-l.hot { fill: var(--cyan); }
-  .fz-node rect { fill: rgba(255, 255, 255, 0.035); stroke: var(--border); stroke-width: 1.4;
-                  transition: stroke .3s ease, fill .3s ease, filter .3s ease; }
-  .fz-node .n-t { fill: var(--text); font: 650 13.5px "Inter", sans-serif; text-anchor: middle;
-                  transition: fill .3s ease; }
-  .fz-node .n-s { fill: var(--text-faint); font: 500 10.5px "SF Mono", ui-monospace, Menlo, monospace;
-                  text-anchor: middle; }
-  .fz-node.ok rect { stroke: var(--lime); fill: rgba(173, 250, 30, 0.10);
-                     filter: drop-shadow(0 0 14px rgba(173, 250, 30, 0.35)); }
-  .fz-node.ok .n-t { fill: var(--lime); }
-  .fz-node.bad rect { stroke: var(--red); fill: rgba(255, 77, 94, 0.10);
-                      filter: drop-shadow(0 0 14px rgba(255, 77, 94, 0.35)); }
-  .fz-node.bad .n-t { fill: var(--red); }
-  .fz-dot { fill: var(--lime); filter: url(#glow); transition: opacity .18s ease; }
-  #fz-stop circle { fill: rgba(255, 77, 94, 0.16); stroke: var(--red); stroke-width: 1.6;
-                    stroke-dasharray: 4 5; }
-  #fz-stop text { fill: var(--red); font-size: 17px; font-weight: 700; text-anchor: middle; }
-  .fz-legend { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 10px;
-               font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
-  .fz-legend b { color: var(--text-dim); font-weight: 600; }
-  .fz-legend i { width: 14px; height: 3px; border-radius: 2px; display: inline-block;
-                 vertical-align: middle; margin-right: 6px; }
-  #attempt-verdict { display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
-                     margin: 6px 0 14px; }
-  .verdict-badge { font-family: var(--mono); font-size: 15px; font-weight: 700; letter-spacing: .12em;
-                   border-radius: 10px; padding: 8px 14px; border: 1px solid transparent; }
-  .verdict-badge.allow { color: var(--bg); background: var(--lime); }
-  .verdict-badge.deny { color: #fff; background: rgba(255, 77, 94, 0.85); }
-  .verdict-note { font-family: var(--mono); font-size: 12px; color: var(--text-dim); }
-  .verdict-chip { font-family: var(--mono); font-size: 11px; letter-spacing: .06em;
-                  border: 1px solid var(--border); border-radius: 999px; padding: 5px 11px;
-                  color: var(--text-dim); background: var(--surface); }
-  .verdict-chip.ok { color: var(--lime); border-color: rgba(173, 250, 30, .35); }
-  .verdict-chip.bad { color: var(--red); border-color: rgba(255, 77, 94, .4); }
-  #attempt-trace { list-style: none; counter-reset: gate; }
-  #attempt-trace li { counter-increment: gate; position: relative; padding: 11px 12px 11px 44px;
-                      border: 1px solid var(--border); border-radius: 12px; margin-bottom: 9px;
-                      background: rgba(0, 0, 0, .22); animation: rise .28s ease; }
-  #attempt-trace li::before { content: counter(gate); position: absolute; left: 13px; top: 12px;
-      width: 20px; height: 20px; border-radius: 6px; display: grid; place-items: center;
-      font-family: var(--mono); font-size: 11px; color: var(--text-dim);
-      background: rgba(255, 255, 255, .07); }
-  #attempt-trace li.ok { border-color: rgba(173, 250, 30, .3); }
-  #attempt-trace li.ok::before { background: var(--lime); color: var(--bg); }
-  #attempt-trace li.bad { border-color: rgba(255, 77, 94, .4); }
-  #attempt-trace li.bad::before { background: var(--red); color: #fff; }
-  #attempt-trace .t-title { font-size: 13px; font-weight: 650; display: block; }
-  #attempt-trace .t-detail { font-family: var(--mono); font-size: 11.5px; color: var(--text-dim);
-                             display: block; margin-top: 3px; word-break: break-word; }
-  .compare { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
-  .compare span { font-family: var(--mono); font-size: 11.5px; padding: 6px 10px; border-radius: 9px;
-                  border: 1px solid var(--border); color: var(--text-dim); }
-  .compare span.want { color: var(--amber); border-color: rgba(255, 176, 32, .35); }
-  .compare span.have { color: var(--lime); border-color: rgba(173, 250, 30, .3); }
-
-  footer { border-top: 1px solid var(--border); padding: 40px 0 60px; margin-top: 40px; color: var(--text-faint); font-size: 13px; }
-  footer .rowf { display: flex; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
-  footer code { font-family: var(--mono); color: var(--text-dim); font-size: 11.5px; }
-  footer a { color: var(--cyan); text-decoration: none; }
-
-  @media (max-width: 940px) {
-    .grid-3, .grid-4, .flow, .vs, .bento { grid-template-columns: 1fr; }
-    .hero { padding: 64px 0 48px; }
-  }
-</style>
+<link rel="stylesheet" href="/static/style.css">
+<script src="/static/app.js" defer></script>
 </head>
 <body>
 
 <header>
   <div class="wrap nav">
-    <div class="brand"><div class="brand-mark"></div> AegisX</div>
-    <div style="display:flex;align-items:center;gap:18px">
+    <div class="brand"><span class="brand-mark"></span> AegisX</div>
+    <div class="nav-right">
       <nav>
         <a href="#what">What it is</a>
         <a href="#how">How it works</a>
@@ -316,372 +26,384 @@
   </div>
 </header>
 
-<section class="hero">
-  <div class="blob blob-a"></div><div class="blob blob-b"></div><div class="blob blob-c"></div>
-  <div class="wrap hero-inner">
-    <div class="kicker"><span class="dot"></span><span class="badge">Identity-Aware Zero Trust Network Access Gateway</span></div>
-    <h1>Invisible until <span class="grad">you're verified.</span></h1>
+<main class="wrap">
+
+  <!-- Hero: what the page is, and the live status at a glance. -->
+  <section class="hero">
+    <p class="kicker">Identity-Aware Zero Trust Network Access Gateway</p>
+    <h1><span class="fade-a">Invisible until</span> <span class="fade-b">you&rsquo;re verified.</span></h1>
     <p class="sub">
-      AegisX replaces the legacy VPN. Instead of “authenticate once, reach everything”,
-      every connection is checked against who you are, which device you're on, and what
-      policy allows — and you only ever see the one application you're entitled to, through
+      AegisX replaces the legacy VPN. Instead of &ldquo;authenticate once, reach everything&rdquo;,
+      every connection is checked against who you are, which device you&rsquo;re on, and what
+      policy allows &mdash; and you only ever see the one application you&rsquo;re entitled to, through
       a tunnel that is re-verified continuously and evaporates the second your session dies.
     </p>
     <div class="pills">
-      <span class="pill">gateway status&nbsp; <b id="hero-status">—</b></span>
-      <span class="pill">state store&nbsp; <b id="hero-redis">checking…</b></span>
+      <span class="pill">gateway status&nbsp; <b id="hero-status">&mdash;</b></span>
+      <span class="pill">state store&nbsp; <b id="hero-redis">checking&hellip;</b></span>
       <span class="pill">open tunnels&nbsp; <b id="hero-tunnels">0</b></span>
       <span class="pill">denied connections&nbsp; <b id="hero-denies">0</b></span>
-      <span class="pill">posture mode&nbsp; <b id="hero-posture">—</b></span>
+      <span class="pill">posture mode&nbsp; <b id="hero-posture">&mdash;</b></span>
     </div>
-  </div>
-</section>
+  </section>
 
-<section id="what">
-  <div class="wrap">
-    <div class="sec-head"><h2>What is this?</h2><span>four moving parts, one rule: default-deny</span></div>
-    <div class="grid-4">
-      <div class="card">
-        <span class="tag">Control plane · the brain</span>
-        <h3>Policy engine</h3>
-        <p>Verifies your password, checks you're <em>entitled</em> to the app you asked for,
-           evaluates your device's posture, then mints a signed JWT pass. It never touches your traffic.</p>
-        <div class="stack">:8000 · /auth/login</div>
-      </div>
-      <div class="card">
-        <span class="tag">State store · the list</span>
-        <h3>Redis</h3>
-        <p>Sub-millisecond memory holding live authorization records plus the audit stream.
-           It is the only thing the gate trusts: no record, no access.</p>
-        <div class="stack">:6379 · route:&lt;ip&gt;</div>
-      </div>
-      <div class="card">
-        <span class="tag">Data plane · the gate</span>
-        <h3>Netty TCP proxy</h3>
-        <p>Sits in front of your applications and reads nothing from a connection until Redis
-           authorizes it. Otherwise the socket is closed — silently, like a dead port.</p>
-        <div class="stack">:9000 · ZtnaAuthHandler</div>
-      </div>
-      <div class="card">
-        <span class="tag">Continuous verification</span>
-        <h3>The re-check loop</h3>
-        <p>Every <em>open</em> tunnel is re-verified against Redis every few seconds. Logout,
-           admin force-revoke, or TTL expiry kills connections that are already flowing.</p>
-        <div class="stack">every 5s · AEGISX_REVALIDATE_SECONDS</div>
-      </div>
+  <!-- Explainer: the four moving parts, and how this differs from a VPN. -->
+  <section id="what">
+    <h2 class="sec-title">What is this?</h2>
+    <p class="sec-sub">Four moving parts, one rule: default-deny.</p>
+
+    <div class="card">
+      <p class="label">Control plane &middot; the brain</p>
+      <h3>Policy engine</h3>
+      <p>Verifies your password, checks you&rsquo;re <em>entitled</em> to the app you asked for,
+         evaluates your device&rsquo;s posture, then mints a signed JWT pass. It never touches your traffic.</p>
+      <p class="endpoint">:8000 &middot; POST /auth/login</p>
     </div>
 
-    <div class="vs">
-      <div class="card bad">
-        <h3>Legacy VPN</h3>
-        <ul>
-          <li>One password gets you on the network — then you can reach <em>everything</em></li>
-          <li>Open ports are visible and scannable by anyone</li>
-          <li>A stolen token stays valid until it expires, hours later</li>
-          <li>No path-level visibility: who is connected right now? Unknown</li>
-        </ul>
-      </div>
-      <div class="card good">
-        <h3>AegisX (Zero Trust)</h3>
-        <ul>
-          <li>Identity + entitlement + device posture decided per login, per app</li>
-          <li>No authorization record? The port is invisible — scans get silence</li>
-          <li>Revocation kills open tunnels within seconds, not hours</li>
-          <li>Every allow/deny is logged; admins can force-revoke a live session</li>
-        </ul>
+    <div class="card">
+      <p class="label">State store &middot; the list</p>
+      <h3>Redis</h3>
+      <p>Sub-millisecond memory holding live authorization records plus the audit stream.
+         It is the only thing the gate trusts: no record, no access.</p>
+      <p class="endpoint">:6379 &middot; route:&lt;ip&gt;</p>
+    </div>
+
+    <div class="card">
+      <p class="label">Data plane &middot; the gate</p>
+      <h3>Netty TCP proxy</h3>
+      <p>Sits in front of your applications and reads nothing from a connection until Redis
+         authorizes it. Otherwise the socket is closed &mdash; silently, like a dead port.</p>
+      <p class="endpoint">:9000 &middot; ZtnaAuthHandler</p>
+    </div>
+
+    <div class="card">
+      <p class="label">Continuous verification</p>
+      <h3>The re-check loop</h3>
+      <p>Every <em>open</em> tunnel is re-verified against Redis every few seconds. Logout,
+         admin force-revoke, or TTL expiry kills connections that are already flowing.</p>
+      <p class="endpoint">every 5s &middot; AEGISX_REVALIDATE_SECONDS</p>
+    </div>
+
+    <div class="card">
+      <p class="label">Comparison</p>
+      <h3>Legacy VPN</h3>
+      <ul class="plain-list">
+        <li>&#10007; One password gets you on the network &mdash; then you can reach <em>everything</em></li>
+        <li>&#10007; Open ports are visible and scannable by anyone</li>
+        <li>&#10007; A stolen token stays valid until it expires, hours later</li>
+        <li>&#10007; No path-level visibility: who is connected right now? Unknown</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <p class="label">Comparison</p>
+      <h3>AegisX (Zero Trust)</h3>
+      <ul class="plain-list">
+        <li>&#10003; Identity + entitlement + device posture decided per login, per app</li>
+        <li>&#10003; No authorization record? The port is invisible &mdash; scans get silence</li>
+        <li>&#10003; Revocation kills open tunnels within seconds, not hours</li>
+        <li>&#10003; Every allow/deny is logged; admins can force-revoke a live session</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- Explainer: the four steps of one connection. -->
+  <section id="how">
+    <h2 class="sec-title">How a connection works</h2>
+    <p class="sec-sub">Identify &rarr; authorize &rarr; provision &rarr; enforce (repeatedly).</p>
+
+    <div class="card">
+      <p class="label">Step 1</p>
+      <h3>You identify</h3>
+      <p>Credentials plus the app you want and your device&rsquo;s posture signals go to the control plane.</p>
+    </div>
+    <div class="card">
+      <p class="label">Step 2</p>
+      <h3>Policy is evaluated</h3>
+      <p>Entitled to <em>that</em> app? Posture claims acceptable? Denials stop here &mdash; before any tunnel exists.</p>
+    </div>
+    <div class="card">
+      <p class="label">Step 3</p>
+      <h3>Pass + tunnel</h3>
+      <p>A signed JWT is minted and, in one atomic Lua script, Redis gets <code>route:&lt;ip&gt; = host:port EX 3600</code>.</p>
+    </div>
+    <div class="card">
+      <p class="label">Step 4</p>
+      <h3>The gate obeys &mdash; and keeps checking</h3>
+      <p>Found &rarr; tunnel to exactly that app, re-verified every 5s. Missing &rarr; silent close. No record ever &rarr; invisible.</p>
+    </div>
+  </section>
+
+  <!-- Flow visualization: a real attempt, drawn gate by gate. -->
+  <section id="flow">
+    <h2 class="sec-title">Watch a decision happen</h2>
+    <p class="sec-sub">Every frame is driven by a real call &mdash; where the attempt stops is where the system stopped it.</p>
+
+    <div class="card">
+      <p class="label">ZTNA flow &middot; live diagram</p>
+      <h3>What happens when you ask for an application</h3>
+      <p class="note">Policy is decided first (control plane), then enforced on every connection (data plane).
+        A denial never reaches the protected application.</p>
+      <svg id="flowviz" viewBox="0 0 980 340" role="img"
+           aria-label="Zero Trust flow: client, control plane, Redis, data plane, protected application">
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5"
+                  markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#8a8a8a"></path>
+          </marker>
+        </defs>
+
+        <path id="p-login"     class="seg" d="M 85 218 C 85 150, 150 70, 250 70" marker-end="url(#arrow)"></path>
+        <path id="p-provision" class="seg" d="M 410 70 L 580 70" marker-end="url(#arrow)"></path>
+        <path id="p-connect"   class="seg" d="M 165 250 L 580 250" marker-end="url(#arrow)"></path>
+        <path id="p-lookup"    class="seg" d="M 660 218 L 660 102" marker-end="url(#arrow)"></path>
+        <path id="p-tunnel"    class="seg" d="M 740 250 L 805 250" marker-end="url(#arrow)"></path>
+
+        <text class="seg-l" id="l-login"     x="140" y="120" transform="rotate(-38 140 120)">attempt &rarr; PDP</text>
+        <text class="seg-l" id="l-provision" x="447" y="60">SET / GET route</text>
+        <text class="seg-l" id="l-connect"   x="330" y="240">TCP connect :9000</text>
+        <text class="seg-l" id="l-lookup"    x="672" y="165">GET route</text>
+        <text class="seg-l" id="l-tunnel"    x="746" y="240">bytes</text>
+
+        <g id="n-client" class="fz-node" transform="translate(5,218)">
+          <rect width="160" height="64" rx="13"></rect>
+          <text class="n-t" x="80" y="27">You / client</text>
+          <text class="n-s" x="80" y="47">certificate + session</text>
+        </g>
+        <g id="n-pdp" class="fz-node" transform="translate(250,38)">
+          <rect width="160" height="64" rx="13"></rect>
+          <text class="n-t" x="80" y="27">Control plane</text>
+          <text class="n-s" x="80" y="47">PDP &middot; policy engine</text>
+        </g>
+        <g id="n-redis" class="fz-node" transform="translate(580,38)">
+          <rect width="160" height="64" rx="13"></rect>
+          <text class="n-t" x="80" y="27">Redis</text>
+          <text class="n-s" x="80" y="47">route:&lt;binding&gt;</text>
+        </g>
+        <g id="n-pep" class="fz-node" transform="translate(580,218)">
+          <rect width="160" height="64" rx="13"></rect>
+          <text class="n-t" x="80" y="27">Data plane</text>
+          <text class="n-s" x="80" y="47">PEP &middot; enforces</text>
+        </g>
+        <g id="n-app" class="fz-node" transform="translate(805,218)">
+          <rect width="160" height="64" rx="13"></rect>
+          <text class="n-t" x="80" y="27">Protected app</text>
+          <text class="n-s" x="80" y="47" id="app-node-label">internal-api</text>
+        </g>
+
+        <circle id="fz-dot" class="fz-dot" r="7" cx="0" cy="0" opacity="0"></circle>
+        <g id="fz-stop" opacity="0">
+          <circle r="17" cx="0" cy="0"></circle>
+          <text y="6">&#10005;</text>
+        </g>
+      </svg>
+      <div class="fz-legend">
+        <span><i class="swatch-live"></i><b>allowed</b> &middot; the packet moved</span>
+        <span><i class="swatch-dead"></i><b>stopped</b> &middot; the decision was made here</span>
+        <span><i class="swatch-idle"></i>idle</span>
       </div>
     </div>
-  </div>
-</section>
 
-<section id="how">
-  <div class="wrap">
-    <div class="sec-head"><h2>How a connection works</h2><span>identify → authorize → provision → enforce (repeatedly)</span></div>
-    <div class="flow">
-      <div class="step"><div class="n">1</div><h4>You identify</h4>
-        <p>Credentials plus the app you want and your device's posture signals go to the control plane.</p></div>
-      <div class="step"><div class="n">2</div><h4>Policy is evaluated</h4>
-        <p>Entitled to <em>that</em> app? Posture claims acceptable? Denials stop here — before any tunnel exists.</p></div>
-      <div class="step"><div class="n">3</div><h4>Pass + tunnel</h4>
-        <p>A signed JWT is minted and, in one atomic Lua script, Redis gets <code>route:&lt;ip&gt; = host:port EX 3600</code>.</p></div>
-      <div class="step"><div class="n">4</div><h4>The gate obeys — and keeps checking</h4>
-        <p>Found → tunnel to exactly that app, re-verified every 5s. Missing → silent close. No record ever → invisible.</p></div>
+    <div class="card">
+      <p class="label">Try it &middot; real attempt</p>
+      <h3>Access an application</h3>
+      <p class="endpoint">POST /demo/attempt</p>
+      <div class="field">
+        <label for="att-user">As</label>
+        <select id="att-user">
+          <option value="alice">alice &mdash; developer (entitled: internal-api)</option>
+          <option value="bob">bob &mdash; analyst (entitled: metrics-dashboard)</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="att-app">Requesting</label>
+        <select id="att-app"></select>
+      </div>
+      <p class="note" id="att-hint"></p>
+      <div class="field"><button class="btn-primary" id="btn-attempt">Attempt access</button></div>
+      <div class="field"><button class="btn-ghost" id="btn-story">Watch a decision happen: open a tunnel, then revoke it</button></div>
+      <div id="attempt-verdict" style="display:none">
+        <span class="verdict-badge" id="vb">&mdash;</span>
+        <span class="verdict-chip" id="vb-by"></span>
+        <span class="verdict-chip" id="vb-wire"></span>
+      </div>
+      <div class="compare" id="cmp" style="display:none">
+        <span class="want" id="cmp-want"></span>
+        <span class="have" id="cmp-have"></span>
+      </div>
+      <p class="verdict-note" id="vb-reason"></p>
+      <ol id="attempt-trace"></ol>
     </div>
-  </div>
-</section>
 
-<section id="flow">
-  <div class="wrap">
-    <div class="sec-head"><h2>Watch a decision happen</h2>
-      <span>every frame is driven by a real call — where the attempt stops is where the system stopped it</span></div>
-    <div class="bento">
-
-      <div class="card live full">
-        <span class="tag">ZTNA flow · live diagram</span>
-        <h3 style="margin:10px 0 6px">What happens when you ask for an application</h3>
-        <p class="empty-note" style="margin-bottom:10px">
-          Policy is decided first (control plane), then enforced on every connection (data plane).
-          A denial never reaches the protected application.
-        </p>
-        <svg id="flowviz" viewBox="0 0 980 340" role="img"
-             aria-label="Zero Trust flow: client, control plane, Redis, data plane, protected application">
-          <defs>
-            <linearGradient id="gseg" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stop-color="#adfa1e"/>
-              <stop offset="100%" stop-color="#4fd1ff"/>
-            </linearGradient>
-            <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
-              <feGaussianBlur stdDeviation="3.6" result="b"/>
-              <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
-            </filter>
-          </defs>
-
-          <path id="p-login"     class="seg" d="M 85 218 C 85 150, 150 70, 250 70"/>
-          <path id="p-provision" class="seg" d="M 410 70 L 580 70"/>
-          <path id="p-connect"   class="seg" d="M 165 250 L 580 250"/>
-          <path id="p-lookup"    class="seg" d="M 660 218 L 660 102"/>
-          <path id="p-tunnel"    class="seg" d="M 740 250 L 805 250"/>
-
-          <text class="seg-l" id="l-login"     x="140" y="120" transform="rotate(-38 140 120)">attempt → PDP</text>
-          <text class="seg-l" id="l-provision" x="447" y="60">SET / GET route</text>
-          <text class="seg-l" id="l-connect"   x="330" y="240">TCP connect :9000</text>
-          <text class="seg-l" id="l-lookup"    x="672" y="165">GET route</text>
-          <text class="seg-l" id="l-tunnel"    x="746" y="240">bytes</text>
-
-          <g id="n-client" class="fz-node" transform="translate(5,218)">
-            <rect width="160" height="64" rx="13"/>
-            <text class="n-t" x="80" y="27">You / client</text>
-            <text class="n-s" x="80" y="47">certificate + session</text>
-          </g>
-          <g id="n-pdp" class="fz-node" transform="translate(250,38)">
-            <rect width="160" height="64" rx="13"/>
-            <text class="n-t" x="80" y="27">Control plane</text>
-            <text class="n-s" x="80" y="47">PDP · policy engine</text>
-          </g>
-          <g id="n-redis" class="fz-node" transform="translate(580,38)">
-            <rect width="160" height="64" rx="13"/>
-            <text class="n-t" x="80" y="27">Redis</text>
-            <text class="n-s" x="80" y="47">route:&lt;binding&gt;</text>
-          </g>
-          <g id="n-pep" class="fz-node" transform="translate(580,218)">
-            <rect width="160" height="64" rx="13"/>
-            <text class="n-t" x="80" y="27">Data plane</text>
-            <text class="n-s" x="80" y="47">PEP · enforces</text>
-          </g>
-          <g id="n-app" class="fz-node" transform="translate(805,218)">
-            <rect width="160" height="64" rx="13"/>
-            <text class="n-t" x="80" y="27">Protected app</text>
-            <text class="n-s" x="80" y="47" id="app-node-label">internal-api</text>
-          </g>
-
-          <circle id="fz-dot" class="fz-dot" r="7" cx="0" cy="0" opacity="0"/>
-          <g id="fz-stop" opacity="0">
-            <circle r="17" cx="0" cy="0"/>
-            <text y="6">✕</text>
-          </g>
-        </svg>
-        <div class="fz-legend">
-          <span><i style="background:linear-gradient(90deg,#adfa1e,#4fd1ff)"></i><b>allowed</b> · the packet moved</span>
-          <span><i style="background:#ff4d5e"></i><b>stopped</b> · the decision was made here</span>
-          <span><i style="background:rgba(255,255,255,.15)"></i>idle</span>
-        </div>
-      </div>
-
-      <div class="card live">
-        <span class="tag">Try it · real attempt</span>
-        <h3 style="margin:10px 0 14px">Access an application</h3>
-        <div class="field">
-          <label>As</label>
-          <select id="att-user">
-            <option value="alice">alice — developer (entitled: internal-api)</option>
-            <option value="bob">bob — analyst (entitled: metrics-dashboard)</option>
-          </select>
-        </div>
-        <div class="field">
-          <label>Requesting</label>
-          <select id="att-app"></select>
-        </div>
-        <p class="empty-note" id="att-hint" style="margin-bottom:12px"></p>
-        <div class="field"><button class="btn-primary" id="btn-attempt">Attempt access</button></div>
-        <div class="field"><button class="btn-ghost" id="btn-story">Watch: open a tunnel, then revoke it</button></div>
-        <div id="attempt-verdict" style="display:none">
-          <span class="verdict-badge" id="vb">—</span>
-          <span class="verdict-chip" id="vb-by"></span>
-          <span class="verdict-chip" id="vb-wire"></span>
-        </div>
-        <div class="compare" id="cmp" style="display:none">
-          <span class="want" id="cmp-want"></span>
-          <span class="have" id="cmp-have"></span>
-        </div>
-        <div class="verdict-note" id="vb-reason" style="margin-top:8px"></div>
-        <ol id="attempt-trace" style="margin-top:12px"></ol>
-      </div>
-
-      <div class="card live">
-        <span class="tag">Frame log</span>
-        <h3 style="margin:10px 0 14px">What the diagram is doing</h3>
-        <div class="log" id="flowlog"><div class="empty-note">Pick an application and press “Attempt access”.</div></div>
-      </div>
-
+    <div class="card">
+      <p class="label">Frame log</p>
+      <h3>What the diagram is doing</h3>
+      <div class="log" id="flowlog"><p class="note">Pick an application and press &ldquo;Attempt access&rdquo;.</p></div>
     </div>
-  </div>
-</section>
+  </section>
 
-<section id="demo">
-  <div class="wrap">
-    <div class="sec-head"><h2>Live demo</h2><span>drives the real servers on this machine — the gateway probe is a real TCP connection</span></div>
-    <div class="bento">
+  <!-- Live demo: login, probe, JWT, counters, Redis, sessions, audit. -->
+  <section id="demo">
+    <h2 class="sec-title">Live demo</h2>
+    <p class="sec-sub">Drives the real servers on this machine &mdash; the gateway probe is a real TCP connection.</p>
 
-      <div class="card live">
-        <span class="tag">Step 1 — identify &amp; authorize</span>
-        <h3 style="margin:10px 0 18px">Log in as a demo user</h3>
-        <div class="field">
-          <label>Identity</label>
-          <select id="user">
-            <option value="alice">alice — developer → internal-api</option>
-            <option value="bob">bob — analyst → metrics-dashboard</option>
-            <option value="admin">admin — administrator (no tunnel)</option>
-          </select>
-        </div>
-        <div class="row">
-          <div class="field"><label>Password</label><input id="pw" type="password" value="alice-dev-pw"></div>
-          <div class="field"><label>Source IP</label><input id="ip" value="127.0.0.1"></div>
-        </div>
-        <div class="field">
-          <label>Requested application (entitlement is enforced)</label>
-          <select id="app"><option value="">(first entitled)</option></select>
-        </div>
-        <div class="field">
-          <label>Device identity — certificate CN (must be the one registered to you)</label>
-          <input id="device" value="alice" placeholder="empty = source-address binding">
-        </div>
-        <div class="field">
-          <label>Device posture</label>
-          <div class="toggle">
-            <input type="checkbox" id="posture-on" checked data-keep
-            <span>report <code>disk_encrypted</code></span>
-            <input type="checkbox" id="posture-value" checked>
-            <span>value: <b id="posture-label">true</b></span>
-          </div>
-        </div>
-        <div class="field"><button class="btn-primary" id="btn-login">Log in &amp; open tunnel</button></div>
-        <div class="field"><button class="btn-ghost" id="btn-logout" disabled>Log out &amp; revoke everything</button></div>
+    <div class="card">
+      <p class="label">Step 1 &mdash; identify &amp; authorize</p>
+      <h3>Log in as a demo user</h3>
+      <p class="endpoint">POST /auth/login</p>
+      <div class="field">
+        <label for="user">Identity</label>
+        <select id="user">
+          <option value="alice">alice &mdash; developer &rarr; internal-api</option>
+          <option value="bob">bob &mdash; analyst &rarr; metrics-dashboard</option>
+          <option value="admin">admin &mdash; administrator (no tunnel)</option>
+        </select>
       </div>
-
-      <div class="card live gateway cloaked" id="gateway">
-        <div class="gw-icon" id="gw-icon">🛡</div>
-        <div class="gw-state" id="gw-state">CLOAKED</div>
-        <div class="gw-desc" id="gw-desc">The PEP on :9000 closes any connection with no Redis record —
-          before reading a single byte. Port scanners receive silence.</div>
-        <div class="field" style="margin-top:12px;text-align:left">
-          <label>Client certificate presented to the PEP</label>
-          <select id="probe-cert"><option value="">none — plaintext connection</option></select>
-        </div>
-        <button class="btn-ghost" id="btn-probe">Probe the gateway over real TCP</button>
-        <div class="probe-result" id="probe"></div>
+      <div class="row">
+        <div class="field"><label for="pw">Password</label><input id="pw" type="password" value="alice-dev-pw"></div>
+        <div class="field"><label for="ip">Source IP</label><input id="ip" value="127.0.0.1"></div>
       </div>
-
-      <div class="card live">
-        <span class="tag">Your JWT</span>
-        <h3 style="margin:10px 0 14px">Decoded pass</h3>
-        <div id="jwt-empty" class="empty-note">Log in to mint a token…</div>
-        <div class="jwt" id="jwt-box" style="display:none">
-          <dl class="claims" id="claims"></dl>
-          <div class="raw" id="raw"></div>
+      <div class="field">
+        <label for="app">Requested application (entitlement is enforced)</label>
+        <select id="app"><option value="">(first entitled)</option></select>
+      </div>
+      <div class="field">
+        <label for="device">Device identity &mdash; certificate CN (must be the one registered to you)</label>
+        <input id="device" value="alice" placeholder="empty = source-address binding">
+      </div>
+      <div class="field">
+        <label>Device posture</label>
+        <div class="toggle">
+          <input type="checkbox" id="posture-on" checked>
+          <span>report <code>disk_encrypted</code></span>
+          <input type="checkbox" id="posture-value" checked>
+          <span>value: <b id="posture-label">true</b></span>
         </div>
       </div>
-
-      <div class="card live">
-        <span class="tag">Event log</span>
-        <h3 style="margin:10px 0 14px">What just happened</h3>
-        <div class="log" id="log"><div class="empty-note">Waiting for your first action…</div></div>
-      </div>
-
-      <div class="card live full">
-        <span class="tag">Live — what the gate is doing</span>
-        <h3 style="margin:10px 0 18px">Enforcement counters</h3>
-        <div class="stat-row">
-          <div class="stat ok"><div class="num" id="m-allow">0</div><div class="lbl">allowed</div></div>
-          <div class="stat bad"><div class="num" id="m-deny">0</div><div class="lbl">denied</div></div>
-          <div class="stat warn"><div class="num" id="m-revoked">0</div><div class="lbl">revoked mid-flow</div></div>
-          <div class="stat info"><div class="num" id="m-active">0</div><div class="lbl">open tunnels</div></div>
-          <div class="stat ok"><div class="num" id="m-logins">0</div><div class="lbl">logins ok</div></div>
-          <div class="stat bad"><div class="num" id="m-logins-bad">0</div><div class="lbl">logins denied</div></div>
-          <div class="stat info"><div class="num" id="m-admin">0</div><div class="lbl">admin revokes</div></div>
-        </div>
-      </div>
-
-      <div class="card live full">
-        <span class="tag">Live — what the gate sees</span>
-        <h3 style="margin:10px 0 14px">Redis state inspector</h3>
-        <div class="legend">
-          <span class="chip">route:* = the only thing that opens the gate</span>
-          <span class="chip">sess:* = PDP's session identity</span>
-          <span class="chip">jwt:deny:* = revoked tokens</span>
-          <span class="chip">login:rl:* / ipl:* / lock:* = brute-force controls</span>
-        </div>
-        <table>
-          <thead><tr><th>key</th><th>value</th><th>authorized by</th><th>ttl</th><th style="width:120px">lifetime</th></tr></thead>
-          <tbody id="redis-rows"><tr><td colspan="5" class="empty-note">No keys yet — log in above.</td></tr></tbody>
-        </table>
-        <div class="subhead">Live sessions (PDP view · joined with the PEP's route)</div>
-        <table>
-          <thead><tr><th>authorized by</th><th>user</th><th>source ip</th><th>app</th><th>target</th><th>ttl</th></tr></thead>
-          <tbody id="session-rows"><tr><td colspan="6" class="empty-note">No open sessions.</td></tr></tbody>
-        </table>
-      </div>
-
-      <div class="card live full">
-        <span class="tag">Audit trail</span>
-        <h3 style="margin:10px 0 14px">Every decision, append-only (Redis Stream)</h3>
-        <div class="audit-line"><span class="meta">time</span><span class="ev">event</span><span class="meta">detail</span></div>
-        <div id="audit" class="log"><div class="empty-note">Nothing logged yet.</div></div>
-      </div>
-
+      <div class="field"><button class="btn-primary" id="btn-login">Log in &amp; open tunnel</button></div>
+      <div class="field"><button class="btn-ghost" id="btn-logout" disabled>Log out &amp; revoke everything</button></div>
     </div>
-  </div>
-</section>
 
-<section id="admin">
-  <div class="wrap">
-    <div class="sec-head"><h2>Admin console</h2><span>real authorization: only an admin-role token can list or kill sessions</span></div>
-    <div class="bento">
-      <div class="card live">
-        <span class="tag">Step 2 — administer</span>
-        <h3 style="margin:10px 0 18px">Sign in to the admin console</h3>
-        <div class="field"><label>Admin password</label><input id="admin-pw" type="password" value="admin-console-pw"></div>
-        <div class="field"><button class="btn-primary" id="btn-admin-login">Authenticate as admin</button></div>
-        <div class="field"><button class="btn-ghost" id="btn-admin-refresh" disabled>Refresh session list</button></div>
-        <p class="empty-note" id="admin-note">Not authenticated. The console calls <code>/admin/sessions</code> and
-          <code>/admin/revoke</code>, which reject non-admin tokens with 403.</p>
-        <div class="subhead">Policy as code (<code>/admin/apps</code>)</div>
-        <div id="apps-view" class="empty-note">Authenticate to load the protected-app policy.</div>
+    <div class="card gateway cloaked" id="gateway">
+      <p class="label">Step 2 &mdash; the gate</p>
+      <h3>Probe the gateway</h3>
+      <p class="endpoint">POST /demo/probe</p>
+      <div class="gw-icon" id="gw-icon">&#128737;</div>
+      <div class="gw-state" id="gw-state">CLOAKED</div>
+      <p class="gw-desc" id="gw-desc">The PEP on :9000 closes any connection with no Redis record &mdash;
+        before reading a single byte. Port scanners receive silence.</p>
+      <div class="field">
+        <label for="probe-cert">Client certificate presented to the PEP</label>
+        <select id="probe-cert"><option value="">none &mdash; plaintext connection</option></select>
       </div>
-      <div class="card live">
-        <span class="tag">Incident response</span>
-        <h3 style="margin:10px 0 14px">Live sessions — force revoke</h3>
-        <table>
-          <thead><tr><th>client</th><th>user</th><th>app</th><th>ttl</th><th></th></tr></thead>
-          <tbody id="admin-rows"><tr><td colspan="5" class="empty-note">Authenticate as admin.</td></tr></tbody>
-        </table>
-        <p class="empty-note" style="margin-top:14px">
-          Force-revoking denylists that session's token and deletes its route, so the PEP tears the
-          open tunnel down within one revalidation interval — even though the user never logged out.
-          Certificate-bound sessions are revoked by their certificate identity.
-        </p>
+      <button class="btn-ghost" id="btn-probe">Probe the gateway over real TCP</button>
+      <div class="probe-result" id="probe"></div>
+    </div>
+
+    <div class="card">
+      <p class="label">Your JWT</p>
+      <h3>Decoded pass</h3>
+      <p class="note" id="jwt-empty">Log in to mint a token&hellip;</p>
+      <div class="jwt" id="jwt-box" style="display:none">
+        <dl class="claims" id="claims"></dl>
+        <div class="raw" id="raw"></div>
       </div>
     </div>
-  </div>
-</section>
+
+    <div class="card">
+      <p class="label">Event log</p>
+      <h3>What just happened</h3>
+      <div class="log" id="log"><p class="note">Waiting for your first action&hellip;</p></div>
+    </div>
+
+    <div class="card">
+      <p class="label">Live &mdash; what the gate is doing</p>
+      <h3>Enforcement counters</h3>
+      <p class="endpoint">GET /dashboard/state &middot; refreshes every 2s</p>
+      <div class="stat-row">
+        <div class="stat"><div class="num" id="m-allow">0</div><div class="lbl">allowed</div></div>
+        <div class="stat"><div class="num" id="m-deny">0</div><div class="lbl">denied</div></div>
+        <div class="stat"><div class="num" id="m-revoked">0</div><div class="lbl">revoked mid-flow</div></div>
+        <div class="stat"><div class="num" id="m-active">0</div><div class="lbl">open tunnels</div></div>
+        <div class="stat"><div class="num" id="m-logins">0</div><div class="lbl">logins ok</div></div>
+        <div class="stat"><div class="num" id="m-logins-bad">0</div><div class="lbl">logins denied</div></div>
+        <div class="stat"><div class="num" id="m-admin">0</div><div class="lbl">admin revokes</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <p class="label">Live &mdash; what the gate sees</p>
+      <h3>Redis state inspector</h3>
+      <p class="endpoint">GET /dashboard/state</p>
+      <div class="legend">
+        <span class="chip">route:* = the only thing that opens the gate</span>
+        <span class="chip">sess:* = PDP&rsquo;s session identity</span>
+        <span class="chip">jwt:deny:* = revoked tokens</span>
+        <span class="chip">login:rl:* / ipl:* / lock:* = brute-force controls</span>
+      </div>
+      <table>
+        <thead><tr><th>key</th><th>value</th><th>authorized by</th><th>ttl</th><th style="width:120px">lifetime</th></tr></thead>
+        <tbody id="redis-rows"><tr><td colspan="5" class="note">No keys yet &mdash; log in above.</td></tr></tbody>
+      </table>
+      <p class="subhead">Live sessions (PDP view &middot; joined with the PEP&rsquo;s route)</p>
+      <table>
+        <thead><tr><th>authorized by</th><th>user</th><th>source ip</th><th>app</th><th>target</th><th>ttl</th></tr></thead>
+        <tbody id="session-rows"><tr><td colspan="6" class="note">No open sessions.</td></tr></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <p class="label">Audit trail</p>
+      <h3>Every decision, append-only (Redis Stream)</h3>
+      <p class="endpoint">GET /dashboard/state &middot; audit stream</p>
+      <div class="audit-line"><span class="meta">time</span><span class="ev">event</span><span class="meta">detail</span></div>
+      <div id="audit" class="log"><p class="note">Nothing logged yet.</p></div>
+    </div>
+  </section>
+
+  <!-- Admin console: list live sessions, force-revoke one. -->
+  <section id="admin">
+    <h2 class="sec-title">Admin console</h2>
+    <p class="sec-sub">Real authorization: only an admin-role token can list or kill sessions.</p>
+
+    <div class="card">
+      <p class="label">Step 2 &mdash; administer</p>
+      <h3>Sign in to the admin console</h3>
+      <p class="endpoint">GET /admin/sessions &middot; POST /admin/revoke</p>
+      <div class="field"><label for="admin-pw">Admin password</label><input id="admin-pw" type="password" value="admin-console-pw"></div>
+      <div class="field"><button class="btn-primary" id="btn-admin-login">Authenticate as admin</button></div>
+      <div class="field"><button class="btn-ghost" id="btn-admin-refresh" disabled>Refresh session list</button></div>
+      <p class="note" id="admin-note">Not authenticated. The console calls <code>/admin/sessions</code> and
+        <code>/admin/revoke</code>, which reject non-admin tokens with 403.</p>
+      <p class="subhead">Policy as code (<code>/admin/apps</code>)</p>
+      <div id="apps-view" class="note">Authenticate to load the protected-app policy.</div>
+    </div>
+
+    <div class="card">
+      <p class="label">Incident response</p>
+      <h3>Live sessions &mdash; force revoke</h3>
+      <table>
+        <thead><tr><th>client</th><th>user</th><th>app</th><th>ttl</th><th></th></tr></thead>
+        <tbody id="admin-rows"><tr><td colspan="5" class="note">Authenticate as admin.</td></tr></tbody>
+      </table>
+      <p class="note">
+        Force-revoking denylists that session&rsquo;s token and deletes its route, so the PEP tears the
+        open tunnel down within one revalidation interval &mdash; even though the user never logged out.
+        Certificate-bound sessions are revoked by their certificate identity.
+      </p>
+    </div>
+  </section>
+
+</main>
 
 <footer>
   <div class="wrap rowf">
     <div>
-      AegisX reference implementation · FastAPI · Redis · Java Netty + Lettuce<br>
-      <a href="/docs">Interactive API (Swagger)</a> · <a href="/health">/health</a> · <a href="/metrics">/metrics</a>
+      AegisX reference implementation &middot; FastAPI &middot; Redis &middot; Java Netty + Lettuce<br>
+      <a href="/docs">Interactive API (Swagger)</a> &middot; <a href="/health">/health</a> &middot; <a href="/metrics">/metrics</a>
     </div>
-    <div style="text-align:right">
-      <code>policy engine · continuous verification · audit trail</code><br>
+    <div class="foot-right">
+      <code>policy engine &middot; continuous verification &middot; audit trail</code><br>
       <code>mTLS: scripts/gen_certs.sh + AEGISX_MTLS=1</code>
     </div>
   </div>
@@ -689,694 +411,5 @@
 
 <div id="toasts"></div>
 
-<script>
-const $ = (id) => document.getElementById(id);
-const ROUTE_TTL = 3600;
-let token = null;
-let adminToken = null;
-
-const PW = { alice: "alice-dev-pw", bob: "bob-analyst-pw", admin: "admin-console-pw" };
-// Each demo identity is registered to a certificate with the same Common Name
-// (scripts/gen_certs.sh), so choosing an identity proposes its device too.
-const DEVICE = { alice: "alice", bob: "bob", admin: "" };
-$("user").addEventListener("change", () => {
-  $("pw").value = PW[$("user").value] || "";
-  $("device").value = DEVICE[$("user").value] || "";
-  $("probe-cert").value = DEVICE[$("user").value] || "";
-});
-$("posture-value").addEventListener("change", () => {
-  $("posture-label").textContent = $("posture-value").checked ? "true" : "false";
-});
-
-function toast(msg, kind = "") {
-  const el = document.createElement("div");
-  el.className = "toast " + kind;
-  el.textContent = msg;
-  $("toasts").appendChild(el);
-  setTimeout(() => el.remove(), 4200);
-}
-
-function log(msg, cls = "info") {
-  if ($("log").querySelector(".empty-note")) $("log").innerHTML = "";
-  const line = document.createElement("div");
-  line.className = "log-line";
-  line.innerHTML = '<time>' + new Date().toLocaleTimeString("en-GB", { hour12: false }) +
-    '</time><span class="' + cls + '">' + msg + '</span>';
-  $("log").prepend(line);
-}
-
-function decodeJwt(t) {
-  const payload = t.split(".")[1];
-  return JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/")));
-}
-
-function eventClass(ev) {
-  if (!ev) return "ev-info";
-  if (ev.indexOf("denied") >= 0 || ev.indexOf("deny") >= 0 || ev.indexOf("revoke") >= 0) return "ev-deny";
-  if (ev.indexOf("success") >= 0 || ev.indexOf("provisioned") >= 0 || ev.indexOf("allow") >= 0) return "ev-ok";
-  if (ev.indexOf("ratelimit") >= 0 || ev.indexOf("locked") >= 0 || ev.indexOf("fail") >= 0) return "ev-warn";
-  return "ev-info";
-}
-
-async function refresh() {
-  let s;
-  try {
-    s = await (await fetch("/dashboard/state", { cache: "no-store" })).json();
-  } catch (e) { $("hero-redis").textContent = "unreachable"; return; }
-
-  $("hero-redis").textContent = "connected";
-  $("hero-tunnels").textContent = s.routes.length;
-  $("hero-denies").textContent = s.metrics.pep_deny_total;
-  $("hero-posture").textContent = s.posture_strict ? "fail-closed" : "claims optional";
-
-  const m = s.metrics;
-  $("m-allow").textContent = m.pep_allow_total;
-  $("m-deny").textContent = m.pep_deny_total;
-  $("m-revoked").textContent = m.pep_revoked_total;
-  $("m-active").textContent = m.pep_active_tunnels;
-  $("m-logins").textContent = m.logins_ok_total;
-  $("m-logins-bad").textContent = m.logins_denied_total;
-  $("m-admin").textContent = m.admin_revocations_total;
-
-  if (!$("app").dataset.filled && s.apps.length) {
-    $("app").innerHTML = '<option value="">(first entitled)</option>' +
-      s.apps.map(a => '<option value="' + a.name + '">' + a.name + " → " + a.target + '</option>').join("");
-    $("app").dataset.filled = "1";
-  }
-
-  if (s.users) ENTITLED = s.users;
-  if (!$("att-app").dataset.filled && s.apps.length) {
-    $("att-app").innerHTML = s.apps.map(a =>
-      '<option value="' + a.name + '">' + a.name + " → " + a.target + '</option>').join("");
-    $("att-app").dataset.filled = "1";
-    pickSurpriseApp();
-    updateHint();
-  }
-  if (!$("probe-cert").dataset.filled && s.certs.length) {
-    $("probe-cert").innerHTML = '<option value="">none — plaintext connection</option>' +
-      s.certs.map(c => '<option value="' + c + '">' + c + '</option>').join("");
-    $("probe-cert").dataset.filled = "1";
-  }
-
-  // A device-bound session is matched on its certificate identity; a plaintext
-  // session on its source address. They are different authorization namespaces.
-  const dev = $("device").value.trim();
-  const ip = $("ip").value.trim();
-  const mine = dev
-    ? s.routes.find(r => r.device === dev)
-    : s.routes.find(r => r.client_ip === ip && !r.device);
-  setGateway(!!mine, mine);
-
-  const rows = [];
-  for (const r of s.routes)
-    rows.push('<tr><td class="k">' + r.key + '</td><td class="v">' + r.target + '</td><td>' +
-      (r.device ? 'cert ' + r.device : 'ip ' + r.client_ip) + '</td><td>' + r.ttl + 's</td>' +
-      '<td><div class="ttlbar"><i style="width:' + Math.max(0, r.ttl / ROUTE_TTL * 100) + '%"></i></div></td></tr>');
-  for (const d of s.denylisted)
-    rows.push('<tr><td class="k">' + d.key.slice(0, 26) + '…</td><td style="color:var(--red)">REVOKED</td><td></td><td>' + d.ttl + 's</td>' +
-      '<td><div class="ttlbar"><i style="width:' + Math.max(0, d.ttl / ROUTE_TTL * 100) + '%;background:linear-gradient(90deg,#7a1f2a,var(--red))"></i></div></td></tr>');
-  for (const l of s.rate_limits)
-    rows.push('<tr><td class="k">' + l.key + '</td><td style="color:var(--amber)">' + l.attempts + ' attempts (' + l.scope + ')</td><td></td><td>' + l.ttl + 's</td><td></td></tr>');
-  for (const l of s.lockouts)
-    rows.push('<tr><td class="k">lock:' + l.username + '</td><td style="color:var(--red)">LOCKED OUT</td><td></td><td>' + l.ttl + 's</td><td></td></tr>');
-  $("redis-rows").innerHTML = rows.length ? rows.join("")
-    : '<tr><td colspan="5" class="empty-note">No keys yet — log in above.</td></tr>';
-
-  $("session-rows").innerHTML = s.sessions.length
-    ? s.sessions.map(x => '<tr><td class="k">' + (x.device ? 'cert ' + x.device : 'ip ' + x.client_ip) +
-        '</td><td>' + x.user + '</td><td>' + x.client_ip + '</td><td>' + x.app +
-        '</td><td>' + x.target + '</td><td>' + x.ttl + 's</td></tr>').join("")
-    : '<tr><td colspan="6" class="empty-note">No open sessions.</td></tr>';
-
-  $("audit").innerHTML = s.audit.length
-    ? s.audit.map(e => '<div class="audit-line"><span class="meta">' +
-        new Date(parseInt(e.ts || "0", 10) * 1000).toLocaleTimeString("en-GB", { hour12: false }) +
-        '</span><span class="ev ' + eventClass(e.event) + '">' + e.event +
-        '</span><span class="meta">' + [e.subject, e.client_ip, e.app, e.target, e.detail]
-          .filter(Boolean).join(" · ") + '</span></div>').join("")
-    : '<div class="empty-note">Nothing logged yet.</div>';
-}
-
-function setGateway(open, route) {
-  const gw = $("gateway");
-  gw.classList.toggle("open", open);
-  gw.classList.toggle("cloaked", !open);
-  $("gw-icon").textContent = open ? "⇄" : "🛡";
-  $("gw-state").textContent = open ? "TUNNEL OPEN" : "CLOAKED";
-  $("gw-desc").textContent = open
-    ? (route.device
-        ? "Only the certificate \"" + route.device + "\" reaches " + route.target + " — " + route.ttl +
-          "s left, re-verified every few seconds. No route exists for a source address, so another process on this host gets nothing."
-        : "Connections from " + route.client_ip + " are proxied to exactly " + route.target +
-          " — and nothing else — for " + route.ttl + "s more, re-verified every few seconds.")
-    : "The PEP on :9000 closes any connection with no Redis record — before reading a single byte. Port scanners receive silence.";
-  $("hero-status").textContent = open ? "TUNNEL OPEN" : "CLOAKED";
-  $("hero-status").style.color = open ? "var(--lime)" : "var(--red)";
-}
-
-$("btn-login").addEventListener("click", async () => {
-  const btn = $("btn-login");
-  btn.disabled = true;
-  const payload = {
-    username: $("user").value,
-    password: $("pw").value,
-    client_ip: $("ip").value.trim(),
-  };
-  const app = $("app").value;
-  if (app) payload.app = app;
-  const device = $("device").value.trim();
-  if (device) payload.device = device;
-  if ($("posture-on").checked) payload.posture = { disk_encrypted: $("posture-value").checked };
-
-  try {
-    const res = await fetch("/auth/login", {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
-    });
-    const body = await res.json();
-    if (res.status === 429 || res.status === 423) {
-      const wait = parseInt(res.headers.get("Retry-After") || "10", 10);
-      toast((res.status === 423 ? "Account locked — " : "Rate limited — ") + "try again in " + wait + "s", "err");
-      log("POST /auth/login → " + res.status + " (brute-force controls)", "warn");
-      setTimeout(() => { btn.disabled = false; }, wait * 1000);
-      return;
-    }
-    if (!res.ok) {
-      toast("Denied: " + (body.detail || res.status), "err");
-      log("POST /auth/login → " + res.status + " · " + (body.detail || ""), "err");
-      btn.disabled = false;
-      await refresh();
-      return;
-    }
-
-    token = body.access_token;
-    const claims = decodeJwt(token);
-    renderJwt(token);
-    $("btn-logout").disabled = false;
-    log("POST /auth/login → 200 · policy evaluated, JWT minted (jti " + claims.jti.slice(0, 8) + "…)", "ok");
-    if (body.target) {
-      log("EVAL login.lua → SET " + body.route_key + " = " + body.target + " EX " + body.expires_in, "ok");
-      if (body.device) log("BINDING: certificate \"" + body.device + "\" — the source address is not an authorization key", "info");
-      toast("Authorized — micro-tunnel provisioned", "ok");
-    } else {
-      toast("Authenticated as " + claims.role + " — no data-plane tunnel", "ok");
-    }
-    await refresh();
-  } catch (e) { toast("Control plane unreachable", "err"); btn.disabled = false; }
-});
-
-$("btn-logout").addEventListener("click", async () => {
-  const res = await fetch("/auth/logout", { method: "POST", headers: { "Authorization": "Bearer " + token } });
-  if (!res.ok) { toast("Logout failed", "err"); return; }
-  const body = await res.json();
-  log("POST /auth/logout → 200 · denylisted jti " + body.jti.slice(0, 8) + "… + route deleted", "err");
-  log("PEP revalidation will close any open tunnel within one interval", "warn");
-  toast("Revoked: token denylisted, tunnel torn down", "ok");
-  token = null;
-  $("btn-logout").disabled = true;
-  $("jwt-box").style.display = "none";
-  $("jwt-empty").style.display = "block";
-  await refresh();
-});
-
-$("btn-probe").addEventListener("click", async () => {
-  const el = $("probe");
-  el.className = "probe-result";
-  el.textContent = "connecting…";
-  el.style.display = "block";
-  try {
-    const cert = $("probe-cert").value;
-    const r = await (await fetch("/demo/probe", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(cert ? { cert: cert } : {}),
-    })).json();
-    const who = r.cert ? "certificate \"" + r.cert + "\" (CN " + r.device + ")" : "no certificate";
-    if (r.allowed) {
-      el.className = "probe-result probe-allow";
-      el.innerHTML = "ALLOW with " + who + " — " + r.detail + "<small>Real TCP connection to " + r.addr +
-        " was proxied: Redis holds a route for that identity.</small>";
-      log("PEP: real TCP probe with " + who + " → ALLOW", "ok");
-    } else {
-      el.className = "probe-result probe-deny";
-      el.innerHTML = "DENY with " + who + " — " + r.detail + "<small>Real TCP connection to " + r.addr +
-        ". Either the handshake was refused or the connection was closed with no payload — the gateway stays invisible.</small>";
-      log("PEP: real TCP probe with " + who + " → DENY", "err");
-    }
-  } catch (e) { el.className = "probe-result probe-deny"; el.textContent = "probe failed"; }
-  await refresh();
-});
-
-// ---- admin console -------------------------------------------------------
-async function adminRefresh() {
-  if (!adminToken) return;
-  const hdr = { "Authorization": "Bearer " + adminToken };
-  const [sessions, apps] = await Promise.all([
-    fetch("/admin/sessions", { headers: hdr }).then(r => r.json()),
-    fetch("/admin/apps", { headers: hdr }).then(r => r.json()),
-  ]);
-  $("admin-rows").innerHTML = sessions.length
-    ? sessions.map(s => '<tr><td class="k">' + (s.device ? 'cert ' + s.device : 'ip ' + s.client_ip) +
-        '</td><td>' + s.user + '</td><td>' + s.app + '</td><td>' + s.ttl + 's</td>' +
-        '<td><button class="btn-mini" data-device="' + (s.device || '') + '" data-ip="' +
-        (s.device ? '' : s.client_ip) + '">revoke</button></td></tr>').join("")
-    : '<tr><td colspan="5" class="empty-note">No live sessions right now.</td></tr>';
-  $("apps-view").innerHTML = apps.map(a => '<div class="audit-line"><span class="ev">' + a.name +
-    '</span><span class="meta">' + a.target + '</span><span class="meta">' +
-    (Object.keys(a.posture_rules).length ? "requires " + JSON.stringify(a.posture_rules) : "no posture rules") +
-    '</span></div>').join("");
-  document.querySelectorAll("#admin-rows .btn-mini").forEach(b => {
-    b.addEventListener("click", () => adminRevoke(b.dataset.device, b.dataset.ip));
-  });
-}
-
-async function adminRevoke(device, ip) {
-  // Certificate-bound sessions are revoked by their certificate identity, not
-  // by an address -- that is the authorization key the PEP consults.
-  const payload = device ? { device: device, reason: "console action" }
-                         : { client_ip: ip, reason: "console action" };
-  const res = await fetch("/admin/revoke", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "Authorization": "Bearer " + adminToken },
-    body: JSON.stringify(payload),
-  });
-  const body = await res.json();
-  if (!res.ok) { toast("Revoke failed: " + (body.detail || res.status), "err"); return; }
-  toast("Force-revoked " + body.revoked_user + " at " + body.client_ip, "ok");
-  log("POST /admin/revoke → 200 · " + body.revoked_user + " (" + body.binding + ") denylisted + route deleted", "err");
-  await Promise.all([adminRefresh(), refresh()]);
-}
-
-$("btn-admin-login").addEventListener("click", async () => {
-  const res = await fetch("/auth/login", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username: "admin", password: $("admin-pw").value, client_ip: $("ip").value.trim() }),
-  });
-  if (!res.ok) { toast("Admin authentication failed", "err"); return; }
-  adminToken = (await res.json()).access_token;
-  $("btn-admin-refresh").disabled = false;
-  $("admin-note").innerHTML = "Authenticated with an <b>admin</b>-role token — it carries no data-plane " +
-    "entitlement, so it can administer sessions but can never open a tunnel.";
-  log("POST /auth/login → 200 · admin console authenticated", "ok");
-  await Promise.all([adminRefresh(), refresh()]);
-});
-
-$("btn-admin-refresh").addEventListener("click", adminRefresh);
-
-// ==========================================================================
-// ZTNA flow visualization
-//
-// Every animation is driven by a real response from /demo/attempt, /demo/probe
-// or /auth/logout: the frames show where the system actually stopped, not a
-// scripted ideal of where it should have.
-// ==========================================================================
-let ENTITLED = {};
-let fzBusy = false;
-const FZ_CENTER = {
-  "n-client": [85, 250], "n-pdp": [330, 70], "n-redis": [660, 70],
-  "n-pep": [660, 250], "n-app": [885, 250],
-};
-const wait = ms => new Promise(r => setTimeout(r, ms));
-
-function esc(value) {
-  return String(value == null ? "" : value).replace(/[&<>"]/g, c =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
-}
-
-function flowLog(msg, cls = "info") {
-  const box = $("flowlog");
-  if (box.querySelector(".empty-note")) box.innerHTML = "";
-  const line = document.createElement("div");
-  line.className = "log-line";
-  line.innerHTML = "<time>" + new Date().toLocaleTimeString("en-GB", { hour12: false }) +
-    '</time><span class="' + cls + '">' + esc(msg) + "</span>";
-  box.appendChild(line);
-  box.scrollTop = box.scrollHeight;
-}
-
-function fzNode(id, state) {
-  const node = $(id);
-  node.classList.remove("ok", "bad");
-  if (state) node.classList.add(state);
-}
-
-function fzSeg(id, state) {
-  const path = $(id);
-  path.classList.remove("live", "dead");
-  if (state) path.classList.add(state);
-}
-
-function fzStop(nodeId, on) {
-  const mark = $("fz-stop");
-  const at = FZ_CENTER[nodeId];
-  if (!at) return;
-  mark.setAttribute("transform", "translate(" + at[0] + "," + at[1] + ")");
-  mark.setAttribute("opacity", on ? "1" : "0");
-}
-
-function resetFlow() {
-  Object.keys(FZ_CENTER).forEach(id => fzNode(id, ""));
-  ["p-login", "p-provision", "p-connect", "p-lookup", "p-tunnel"].forEach(id => {
-    fzSeg(id, "");
-    const label = document.getElementById("l" + id.slice(1));
-    if (label) label.classList.remove("hot");
-  });
-  fzStop("n-pdp", false);
-  $("fz-dot").setAttribute("opacity", "0");
-  $("flowlog").innerHTML = "";
-}
-
-function setFlowButtons(playing) {
-  ["btn-attempt", "btn-story", "btn-probe"].forEach(id => {
-    const b = $(id);
-    if (b) b.disabled = playing;
-  });
-}
-
-async function fzMove(pathId, tone = "ok", ms = 520) {
-  const path = $(pathId);
-  const label = document.getElementById("l" + pathId.slice(1));
-  const dot = $("fz-dot");
-  const len = path.getTotalLength();
-  fzSeg(pathId, tone === "bad" ? "dead" : "live");
-  if (label) label.classList.add("hot");
-  dot.setAttribute("opacity", "1");
-  const t0 = performance.now();
-  await new Promise(resolve => {
-    function step(now) {
-      const t = Math.min(1, (now - t0) / ms);
-      const pt = path.getPointAtLength(len * t);
-      dot.setAttribute("cx", pt.x);
-      dot.setAttribute("cy", pt.y);
-      if (t < 1) requestAnimationFrame(step); else resolve();
-    }
-    requestAnimationFrame(step);
-  });
-  dot.setAttribute("opacity", "0");
-}
-
-function renderJwt(tok) {
-  const claims = decodeJwt(tok);
-  $("jwt-empty").style.display = "none";
-  $("jwt-box").style.display = "block";
-  $("claims").innerHTML = Object.entries({
-    sub: claims.sub, role: claims.role, client_ip: claims.client_ip,
-    jti: claims.jti, exp: new Date(claims.exp * 1000).toLocaleTimeString(),
-  }).map(([k, v]) => "<dt>" + esc(k) + "</dt><dd>" + esc(v) + "</dd>").join("");
-  $("raw").textContent = tok;
-}
-
-function renderVerdict(a) {
-  $("attempt-verdict").style.display = "flex";
-  const allow = a.decision === "ALLOW";
-  $("vb").textContent = allow ? "ALLOW" : "DENY";
-  $("vb").className = "verdict-badge " + (allow ? "allow" : "deny");
-  $("vb-by").textContent = a.decided_by ? "stopped at: " + a.decided_by : "all gates passed";
-  $("vb-by").className = "verdict-chip " + (a.decided_by ? "bad" : "ok");
-  const wire = {
-    ok: ["wire: bytes flowed", "ok"],
-    denied: ["wire: refused by the gateway", "bad"],
-    unavailable: ["wire: gateway unreachable", "bad"],
-    "": ["wire: not consulted", ""],
-  }[a.wire] || ["", ""];
-  $("vb-wire").textContent = wire[0];
-  $("vb-wire").className = "verdict-chip " + wire[1];
-  $("vb-reason").textContent = a.reason || "";
-  const cmp = $("cmp");
-  if (a.requested_app || a.route_target) {
-    cmp.style.display = "flex";
-    $("cmp-want").textContent = "asked for: " + a.requested_app +
-      (a.requested_target ? " → " + a.requested_target : "");
-    $("cmp-have").textContent = a.route_target
-      ? "your record delivers: " + a.route_target +
-        (a.entitled_apps && a.entitled_apps.length ? " (entitled: " + a.entitled_apps.join(", ") + ")" : "")
-      : "no authorization record";
-  } else {
-    cmp.style.display = "none";
-  }
-  $("attempt-trace").innerHTML = (a.stages || []).map(s =>
-    '<li class="' + (s.ok ? "ok" : "bad") + '"><span class="t-title">' + esc(s.title) +
-    '</span><span class="t-detail">' + esc(s.detail) + "</span></li>").join("");
-}
-
-async function runTrace(a) {
-  resetFlow();
-  const gates = {};
-  (a.stages || []).forEach(s => { gates[s.stage] = s; });
-
-  if (gates.identity && !gates.identity.ok) {
-    fzNode("n-client", "bad");
-    fzStop("n-client", true);
-    flowLog("attempt rejected before any lookup: " + gates.identity.detail, "err");
-    flowLog("continuous verification: the denylist is consulted on every API call", "warn");
-    return;
-  }
-
-  fzNode("n-client", "ok");
-  flowLog("POST /demo/attempt {app: " + a.requested_app + "} as " + a.identity, "info");
-  await fzMove("p-login");
-  fzNode("n-pdp", "ok");
-  if (gates.identity) flowLog("identity ok: " + gates.identity.detail, "ok");
-
-  const ent = gates.entitlement;
-  if (!ent || !ent.ok) {
-    fzNode("n-pdp", "bad");
-    fzStop("n-pdp", true);
-    flowLog("entitlement: " + ((ent && ent.detail) || a.reason), "err");
-    flowLog("stopped at the policy engine — the data plane is never consulted", "err");
-    fzNode("n-pep", "bad");
-    if (a.route_target) {
-      flowLog("this identity's live record still only delivers " + a.route_target, "warn");
-      fzNode("n-redis", "ok");
-    }
-    return;
-  }
-  flowLog("entitlement: " + ent.detail, "ok");
-
-  // The PDP reads the authorization record from Redis for this binding.
-  await fzMove("p-provision");
-  const route = gates.route;
-  if (!route || !route.ok) {
-    fzNode("n-redis", "bad");
-    fzStop("n-redis", true);
-    flowLog("record missing: " + ((route && route.detail) || a.reason), "err");
-    fzNode("n-pep", "bad");
-    flowLog("a connection now would be cloaked — closed before any byte", "err");
-    return;
-  }
-  fzNode("n-redis", "ok");
-  flowLog("record found: " + route.detail, "ok");
-
-  const gw = gates.gateway;
-  if (!gw) return;
-
-  fzNode("n-client", "ok");
-  await fzMove("p-connect");
-  fzNode("n-pep", "ok");
-  flowLog("PEP: real TCP connection" +
-    (a.gateway && a.gateway.cert ? " presenting certificate " + a.gateway.cert : ""), "info");
-
-  await fzMove("p-lookup");
-  if (!gw.ok) {
-    fzNode("n-redis", "bad");
-    fzNode("n-pep", "bad");
-    fzStop("n-pep", true);
-    flowLog("gateway: " + gw.detail, "err");
-    return;
-  }
-  fzNode("n-redis", "ok");
-  await fzMove("p-tunnel");
-  fzNode("n-app", "ok");
-  if (a.delivered_app) {
-    $("app-node-label").textContent = a.delivered_app +
-      (a.delivered_port ? " :" + a.delivered_port : "");
-  }
-  flowLog("tunnel: " + gw.detail, "ok");
-  flowLog("ALLOW — the request reached " + (a.delivered_app || "the protected application"), "ok");
-}
-
-function pickSurpriseApp() {
-  // Default the panel to an application the selected identity is NOT entitled
-  // to, so the first click demonstrates a cross-application denial.
-  const user = $("att-user").value;
-  const me = ENTITLED[user];
-  const options = [...$("att-app").options].map(o => o.value);
-  if (!me || !options.length) return;
-  const surprise = options.find(app => !me.apps.includes(app));
-  if (surprise) $("att-app").value = surprise;
-}
-
-function updateHint() {
-  const user = $("att-user").value;
-  const app = $("att-app").value;
-  const me = ENTITLED[user];
-  const hint = $("att-hint");
-  if (!me || !app) { hint.textContent = ""; return; }
-  hint.textContent = me.apps.includes(app)
-    ? user + " is entitled to " + app + " — expect ALLOW, with a real socket opened in the last gate."
-    : user + " is entitled to " + me.apps.join(", ") + " only — requesting " + app +
-      " should stop at gate 2, before the data plane is ever consulted.";
-}
-
-async function ensureSession(user, fresh = false) {
-  // fresh=true skips the cached token: the revocation story must START from a
-  // real provisioning step, so an externally-revoked route is re-created rather
-  // than silently reused.
-  if (!fresh && token) {
-    try {
-      if (decodeJwt(token).sub === user) return token;
-    } catch (e) { /* fall through to a fresh login */ }
-  }
-  const payload = {
-    username: user,
-    password: PW[user],
-    client_ip: $("ip").value.trim() || "127.0.0.1",
-  };
-  if (DEVICE[user]) payload.device = DEVICE[user];
-  const res = await fetch("/auth/login", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  if (res.status === 429) {
-    throw new Error("rate limited — wait " + (res.headers.get("Retry-After") || "60") + "s (5 logins/min per identity)");
-  }
-  if (res.status === 423) throw new Error("account temporarily locked after repeated failures");
-  if (!res.ok) throw new Error("login failed (HTTP " + res.status + ")");
-  const body = await res.json();
-  token = body.access_token;
-  // In the revocation story this survives resetFlow (which runs first), so the
-  // diagram narrates the actual identify step rather than starting mid-flight.
-  flowLog("POST /auth/login → 200 · JWT minted for " + user +
-    (payload.device ? " · binding device:" + payload.device : "") +
-    " · route provisioned in one atomic Lua script", "info");
-  renderJwt(token);
-  $("btn-logout").disabled = false;
-  await refresh();
-  return token;
-}
-
-async function doAttempt(tok, app) {
-  const res = await fetch("/demo/attempt", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "Authorization": "Bearer " + tok },
-    body: JSON.stringify({ app: app }),
-  });
-  if (res.status === 401) {
-    const err = new Error("token rejected by continuous verification (401)");
-    err.revoked = true;
-    throw err;
-  }
-  if (!res.ok) throw new Error("attempt failed: HTTP " + res.status);
-  return res.json();
-}
-
-$("att-user").addEventListener("change", () => { pickSurpriseApp(); updateHint(); });
-$("att-app").addEventListener("change", updateHint);
-
-$("btn-attempt").addEventListener("click", async () => {
-  const user = $("att-user").value;
-  const app = $("att-app").value;
-  $("btn-attempt").disabled = true;
-  try {
-    const tok = await ensureSession(user);
-    const attempt = await doAttempt(tok, app);
-    renderVerdict(attempt);
-    await runTrace(attempt);
-  } catch (e) {
-    if (e.revoked) {
-      const synthetic = {
-        identity: user, binding: "", requested_app: app, requested_target: "",
-        entitled_apps: [], route_key: "", route_target: "", route_ttl: 0,
-        decision: "DENY", decided_by: "continuous-verification",
-        reason: "the token is on the denylist — a revoked signature is still valid but never accepted",
-        wire: "",
-        stages: [{ stage: "identity", ok: false, title: "Identity verified",
-                   detail: "401 · revoked (jwt:deny)" }],
-      };
-      renderVerdict(synthetic);
-      await runTrace(synthetic);
-      token = null;
-      $("btn-logout").disabled = true;
-      $("jwt-box").style.display = "none";
-      $("jwt-empty").style.display = "block";
-      await refresh();
-    } else {
-      toast(String(e.message || e), "err");
-    }
-  } finally {
-    $("btn-attempt").disabled = false;
-  }
-});
-
-$("btn-story").addEventListener("click", async () => {
-  if (fzBusy) return;
-  fzBusy = true;
-  setFlowButtons(true);
-  const user = $("att-user").value;
-  try {
-    resetFlow();
-    const app = (ENTITLED[user] && ENTITLED[user].apps[0]) || $("att-app").value;
-    const tok = await ensureSession(user, true);
-    const attempt = await doAttempt(tok, app);
-    renderVerdict(attempt);
-    await runTrace(attempt);
-    if (attempt.decision !== "ALLOW") {
-      flowLog("no tunnel opened — nothing to revoke", "warn");
-      return;
-    }
-
-    flowLog("session live: " + attempt.route_key + " = " + attempt.route_target +
-      " (TTL " + attempt.route_ttl + "s)", "ok");
-    await wait(700);
-
-    // --- real revocation -------------------------------------------------
-    const out = await fetch("/auth/logout", { method: "POST", headers: { "Authorization": "Bearer " + tok } });
-    if (out.ok) {
-      const ob = await out.json();
-      flowLog("POST /auth/logout → denylisted jti " + ob.jti.slice(0, 8) +
-        "… + route deleted, in one atomic Lua script", "err");
-    }
-    token = null;
-    $("btn-logout").disabled = true;
-    $("jwt-box").style.display = "none";
-    $("jwt-empty").style.display = "block";
-    fzNode("n-redis", "bad");
-    fzStop("n-redis", true);
-    await refresh();
-    await wait(500);
-
-    // --- the same identity now gets nothing ------------------------------
-    const cert = DEVICE[user] || "";
-    const pr = await (await fetch("/demo/probe", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(cert ? { cert: cert } : {}),
-    })).json();
-    fzStop("n-redis", false);
-    await fzMove("p-connect", pr.allowed ? "ok" : "bad");
-    fzNode("n-pep", pr.allowed ? "ok" : "bad");
-    flowLog("PEP: connection with " + (cert ? "certificate " + cert : "no certificate") +
-      " → " + (pr.allowed ? "ALLOW" : "DENY"), pr.allowed ? "ok" : "err");
-    await fzMove("p-lookup", pr.allowed ? "ok" : "bad");
-    fzNode("n-redis", "bad");
-    fzStop("n-pep", !pr.allowed);
-    if (pr.allowed) {
-      fzNode("n-app", "ok");
-      flowLog("a route still exists for this identity: " + pr.detail, "warn");
-    } else {
-      flowLog("GET " + attempt.route_key + " → nil → closed before any byte (cloak)", "err");
-      flowLog("continuous verification: a tunnel already open would die within 5s too", "warn");
-    }
-    await refresh();
-  } catch (e) {
-    toast(String(e.message || e), "err");
-    flowLog("error: " + String(e.message || e), "err");
-  } finally {
-    fzBusy = false;
-    setFlowButtons(false);
-  }
-});
-
-refresh();
-setInterval(refresh, 2000);
-setInterval(() => { if (adminToken) adminRefresh(); }, 4000);
-</script>
 </body>
 </html>

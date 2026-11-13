@@ -76,6 +76,10 @@ public final class ZtnaAuthHandler extends ChannelInboundHandlerAdapter {
         this.revalidateSeconds = revalidateSeconds;
     }
 
+    // -----------------------------------------------------------------------
+    // 1. Auth check: with mTLS, wait for the handshake and the verified
+    //    client certificate before anything else is decided.
+    // -----------------------------------------------------------------------
     @Override
     public void channelActive(ChannelHandlerContext ctx) {
         // With mTLS the client certificate must be verified before we look
@@ -110,6 +114,10 @@ public final class ZtnaAuthHandler extends ChannelInboundHandlerAdapter {
         beginAuthorization(ctx, null);
     }
 
+    // -----------------------------------------------------------------------
+    // 2. Redis lookup: does the PDP's authorization record exist for this
+    //    identity? No record (or a Redis error) means deny -- fail closed.
+    // -----------------------------------------------------------------------
     /**
      * Resolve the authorization identity for this connection.
      *
@@ -140,6 +148,10 @@ public final class ZtnaAuthHandler extends ChannelInboundHandlerAdapter {
                 }));
     }
 
+    // -----------------------------------------------------------------------
+    // 3. Tunnel open: the route exists, so connect to the protected app,
+    //    swap this handler for the byte relays, and start revalidation.
+    // -----------------------------------------------------------------------
     private void authorize(ChannelHandlerContext ctx, String remoteIp, String routeKey, String rawTarget) {
         final RouteTarget target;
         try {
@@ -190,6 +202,10 @@ public final class ZtnaAuthHandler extends ChannelInboundHandlerAdapter {
         });
     }
 
+    // -----------------------------------------------------------------------
+    // 4. Revalidation: an open tunnel is re-checked against Redis on a
+    //    timer, so a logout or admin revoke kills it mid-connection.
+    // -----------------------------------------------------------------------
     /**
      * Continuous verification: while the tunnel is open, re-read the route
      * record. Missing (revoked/expired) or changed means the session no longer
@@ -228,6 +244,10 @@ public final class ZtnaAuthHandler extends ChannelInboundHandlerAdapter {
         client.close();
     }
 
+    // -----------------------------------------------------------------------
+    // 5. Close: stop the revalidation timer, drop the counters, and (for a
+    //    deny) release any parked payload without forwarding a byte.
+    // -----------------------------------------------------------------------
     private void closeTunnel(Channel client, String remoteIp, String target) {
         ScheduledFuture<?> task = client.attr(REVALIDATION).getAndSet(null);
         if (task != null) {
@@ -248,6 +268,12 @@ public final class ZtnaAuthHandler extends ChannelInboundHandlerAdapter {
         ctx.close();
     }
 
+    // -----------------------------------------------------------------------
+    // Pre-authorization payload: in mTLS mode reads are enabled so the
+    // handshake can complete, so bytes may arrive before the decision.
+    // They are parked here, replayed into the tunnel only on allow, and
+    // released (never forwarded) on deny.
+    // -----------------------------------------------------------------------
     /**
      * Holds payload that arrived before the authorization decision (possible in
      * mTLS mode, where reads are enabled so the handshake can complete). It is
@@ -344,14 +370,14 @@ public final class ZtnaAuthHandler extends ChannelInboundHandlerAdapter {
             java.security.cert.Certificate[] chain =
                     ssl.engine().getSession().getPeerCertificates();
             if (chain.length > 0 && chain[0] instanceof X509Certificate cert) {
-                String dn = cert.getSubjectX500Principal().getName();
-                for (String part : dn.split(",")) {
-                    String trimmed = part.trim();
+                String subjectDn = cert.getSubjectX500Principal().getName();
+                for (String rdnPart : subjectDn.split(",")) {
+                    String trimmed = rdnPart.trim();
                     if (trimmed.startsWith("CN=")) {
                         return trimmed.substring(3);
                     }
                 }
-                return dn;
+                return subjectDn;
             }
         } catch (Exception e) {
             log.debug("no client certificate identity available: {}", e.toString());

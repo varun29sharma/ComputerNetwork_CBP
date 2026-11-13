@@ -6,9 +6,13 @@ __pycache__/
 
 # Java / Maven
 data-plane/target/
+target/
 
 # Local tooling / logs
 .tools/
+logs/
+.freebuff/
+*.log
 
 # Throwaway demo PKI (scripts/gen_certs.sh) -- never commit a private key
 certs/

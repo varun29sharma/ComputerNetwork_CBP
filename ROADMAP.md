@@ -24,10 +24,22 @@ Legend: **✅ done** · **▶ next** · **⏳ later**
 | Real TCP enforcement probe | ✅ | `tests/test_probe.py`, `/demo/probe` |
 | **mTLS** with authorization keyed on the certificate CN (`route:device:<CN>`) | ✅ | `scripts/demo_mtls.sh` (same IP: alice's cert allowed, bob's denied), `tests/test_device_identity.py` |
 | Brute-force controls: per-user + per-IP limits, lockout | ✅ | `tests/test_auth.py` (429), `fails:*`/`lock:*` |
+| Socket-derived `client_ip` (`X-Forwarded-For` only with `AEGISX_TRUST_PROXY=1`) | ✅ | `routes_auth.py: resolve_client_ip` (rework, Nov 2026) |
+| Docker Compose stack (`redis`, `control-plane`, `pep`, `target`) | ✅ | `docker-compose.yml` (rework, Nov 2026; not runtime-verified) |
+| `/ready` readiness endpoint (Redis ping + users seeded) | ✅ | `routes_health.py` (rework, Nov 2026) |
+| PEP load-test harness (accept-to-close latency) | ✅ | `scripts/loadtest_pep.py` (rework, Nov 2026) |
+| CI: Python tests + Java build + dashboard JS check | ✅ | `.github/workflows/ci.yml` (rework, Nov 2026) |
 
 What it is *not* yet: a single-machine demo topology. It is a real enforcement
 path with real policy, real revocation and real cryptographic identity — but it
 runs one control plane, one PEP and one Redis on one host.
+
+**Done in this rework (Nov 2026):** socket-derived `client_ip` with the
+trust-proxy rule (1.1), the Docker Compose stack (2.1), the `/ready` endpoint
+(2.2, endpoint only — the PEP is not yet gated on it at startup), the PEP
+load-test harness (2.3, without the blocking-Jedis comparison, which was
+deliberately not built), and CI (no roadmap item existed for it). See the
+marked items below.
 
 ---
 
@@ -36,9 +48,13 @@ runs one control plane, one PEP and one Redis on one host.
 Everything here removes the demo shortcuts that a security reviewer will flag
 first. None of it needs new infrastructure.
 
-### 1.1 Derive `client_ip` from the socket, not the payload
+### 1.1 Derive `client_ip` from the socket, not the payload — ✅ done
 `client_ip` in the login body is a demo shortcut. Bind the login to the real
 source address and make the payload field developer-only.
+- **Done in this rework (Nov 2026)**: `routes_auth.py: resolve_client_ip` —
+  socket IP by default; `X-Forwarded-For` (first entry) only when
+  `AEGISX_TRUST_PROXY=1`, falling back to the payload value when no header is
+  present so tests can simulate a proxy.
 - **Files**: `control-plane/app/main.py`, `schemas.py`, `tests/test_auth.py`
 - **Approach**: use `request.client.host` always; keep an override behind
   `AEGISX_TRUST_PROXY=1` that reads `X-Forwarded-For` from trusted hops only.
@@ -81,25 +97,41 @@ The PDP is plain HTTP today. Add HTTPS with the same demo CA.
 
 ## Phase 2 ▶ — Operations: make it runnable by someone else (1–2 days)
 
-### 2.1 Docker Compose stack
+### 2.1 Docker Compose stack — ✅ done
 `redis`, `control-plane`, `pep`, and a `target` service in one `compose up`,
 with healthchecks and the cert volume mounted read-only.
+- **Done in this rework (Nov 2026)**: `docker-compose.yml` + Dockerfiles for
+  all four services (`control-plane/Dockerfile`, `data-plane/Dockerfile`,
+  `examples/Dockerfile`). Two deviations from the plan: the target shares the
+  PEP's network namespace (`network_mode: "service:pep"`) because
+  `APP_TARGETS` hardcodes `127.0.0.1:8080`; and no cert volume is mounted —
+  compose runs the plaintext demo, so mTLS wiring is still to come.
+  Not runtime-verified (no Docker in the build VM).
 - **Files**: `deploy/Dockerfile.control-plane`, `deploy/Dockerfile.pep`, `docker-compose.yml`
 - **Verify**: `docker compose up -d && ./scripts/demo_e2e.sh` against the
   published ports. This also gives a laptop-independent reproduction path.
 
-### 2.2 Readiness and liveness endpoints
+### 2.2 Readiness and liveness endpoints — ✅ done (endpoint only)
 `/health` is a single flat check today. Add `/ready` (Redis reachable **and**
 user directory seeded) and point the PEP at it at startup so it refuses to
 serve until it can read state.
+- **Done in this rework (Nov 2026)**: `/ready` in `routes_health.py` — 200
+  `{"status": "ready"}` only when Redis pings OK and at least one `users:*`
+  record exists, else 503. Not done: pointing the PEP at it at startup (the
+  PEP still starts regardless; it fails closed per-connection instead).
 - **Files**: `main.py`, `ZtnaProxyServer.java`
 - **Verify**: a test that stops Redis and asserts `/ready` → 503 while `/health`
   still answers, plus a PEP test that starts with Redis down and refuses traffic.
 
-### 2.3 Load test: prove the non-blocking claim (this is the report's thesis)
+### 2.3 Load test: prove the non-blocking claim (this is the report's thesis) — ✅ done (harness only)
 Ship a harness that hammers the PEP with concurrent unauthorized connections and
 measures EventLoop responsiveness, then *reproduce the anti-pattern* by swapping
 Lettuce for a blocking Jedis lookup behind a flag.
+- **Done in this rework (Nov 2026)**: `scripts/loadtest_pep.py` (stdlib only)
+  measures accept-to-close latency (p50/p99/mean, connections/sec) against the
+  real non-blocking PEP. Deliberately NOT built: the blocking-Jedis comparison
+  variant — the anti-pattern stays out of the codebase, so the README table
+  comparing both modes does not exist either.
 - **Files**: `scripts/loadtest_pep.py`, `ZtnaAuthHandler.java` (`AEGISX_BLOCKING_REDIS=1` for the comparison only)
 - **Verify**: a table in the README: p50/p99 accept-to-close latency and
   throughput for both modes at 200/1000/5000 concurrent connections, showing

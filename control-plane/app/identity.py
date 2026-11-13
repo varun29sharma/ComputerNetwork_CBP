@@ -51,10 +51,14 @@ _DEMO_USERS: Dict[str, Dict[str, object]] = {
 }
 
 
+# One place builds the directory key, so the PDP can never disagree with
+# itself about where a user lives (and the 64-char cap keeps keys bounded).
 def user_key(username: str) -> str:
     return "users:{}".format(username[:64])
 
 
+# PBKDF2 with a random salt: slow on purpose, so a stolen hash cannot be
+# brute-forced cheaply, and salted so identical passwords hash differently.
 def hash_password(password: str, salt: Optional[bytes] = None) -> str:
     salt = salt or os.urandom(16)
     digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, _PBKDF2_ROUNDS)
@@ -83,6 +87,8 @@ async def seed_users(redis: aioredis.Redis) -> None:
             await redis.hsetnx(key, field, value)
 
 
+# A record without a password hash is not a user -- treat a half-written
+# directory entry as "no such user" rather than trusting it.
 async def get_user(redis: aioredis.Redis, username: str) -> Optional[Dict[str, object]]:
     data = await redis.hgetall(user_key(username))
     if not data or "password_hash" not in data:
@@ -115,6 +121,8 @@ async def verify_credentials(
     return user
 
 
+# Burns one PBKDF2 round for an unknown user, so "no such user" takes as
+# long as "wrong password" and timing cannot enumerate the directory.
 def _hash_password_dummy(password: str) -> None:
     hash_password(password, b"\x00" * 16)
 

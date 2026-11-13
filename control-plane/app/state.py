@@ -25,6 +25,11 @@ from . import config
 
 # Atomic login gate: lockout check + per-user and per-IP rate accounting +
 # failure-streak tracking + micro-tunnel provisioning, in one indivisible op.
+# Atomicity matters because check-then-write in separate commands races: two
+# concurrent logins could both pass the rate check before either increments
+# (doubling the allowed burst), or a failed login could slip a route in
+# between the policy check and the write. Inside one Lua script Redis runs
+# the whole gate with no other command interleaved, so that cannot happen.
 # KEYS[1]=user rl  KEYS[2]=route (keyed by session binding)  KEYS[3]=ip rl
 # KEYS[4]=fails  KEYS[5]=lock
 # ARGV[1]=win ARGV[2]=max_user ARGV[3]=target('') ARGV[4]=route_ttl
@@ -59,6 +64,9 @@ return {1, u, u_retry, 'ok'}
 # Atomic revocation: denylist the jti, delete the PEP's route and the PDP's
 # session record in one operation -- the PEP can never see a half-revoked
 # session, and continuous revalidation kills already-open tunnels.
+# Without atomicity a crash (or a concurrent revalidation read) between the
+# denylist write and the route delete would leave the tunnel live while the
+# token looks revoked, or vice versa -- the two planes would disagree.
 # KEYS[1]=denylist KEYS[2]=route KEYS[3]=sess  ARGV[1]=deny ttl
 LOGOUT_LUA = """
 if redis.call('EXISTS', KEYS[1]) == 0 then
@@ -93,6 +101,8 @@ def split_binding(name: str) -> Dict[str, str]:
     return {"binding": "ip", "device": "", "client_ip": name}
 
 
+# Key builders: one place builds each Redis key name, so the PDP (and the
+# Java PEP, which hard-codes the same prefixes) can never disagree on a name.
 def route_key(binding_name: str) -> str:
     return "route:{}".format(binding_name)
 
@@ -121,6 +131,8 @@ def lock_key(username: str) -> str:
     return "lock:{}".format(username[:64])
 
 
+# decode_responses=True: keys and values come back as str, not bytes, so
+# the rest of the code never has to decode Redis replies by hand.
 async def connect() -> aioredis.Redis:
     return aioredis.from_url(config.REDIS_URL, decode_responses=True)
 
@@ -135,6 +147,8 @@ async def audit(redis: aioredis.Redis, event: str, **fields) -> None:
     await redis.xadd("audit:events", body, maxlen=10000, approximate=True)
 
 
+# Newest-first (xrevrange): the dashboard and /admin/audit want the latest
+# decisions, not the oldest ones.
 async def recent_audit(redis: aioredis.Redis, count: int = 50) -> List[Dict[str, str]]:
     entries: List[Dict[str, str]] = []
     raw = await redis.xrevrange("audit:events", count=count)
@@ -148,6 +162,8 @@ async def recent_audit(redis: aioredis.Redis, count: int = 50) -> List[Dict[str,
 # ---------------------------------------------------------------------------
 # Session records (PDP view of a live tunnel)
 # ---------------------------------------------------------------------------
+# Written as one pipeline so the session record and its TTL land together:
+# a record without a TTL would outlive its route and look live forever.
 async def set_session(
     redis: aioredis.Redis, binding_name: str, mapping: Dict[str, str], ttl: int
 ) -> None:
@@ -236,10 +252,13 @@ async def is_denied(redis: aioredis.Redis, jti: str) -> bool:
 # ---------------------------------------------------------------------------
 # Counters (metrics)
 # ---------------------------------------------------------------------------
+# Redis INCR is atomic, so concurrent logins cannot lose a count.
 async def incr_counter(redis: aioredis.Redis, name: str) -> None:
     await redis.incr(name)
 
 
+# One pipeline read for all counters, plus a live count of route:* keys, so
+# /metrics shows the PDP and PEP views from (nearly) the same moment.
 async def metrics(redis: aioredis.Redis) -> Dict[str, int]:
     names = ("pep:allow", "pep:deny", "pep:closed", "pep:revoked",
              "logins:ok", "logins:denied", "admin:revocations")

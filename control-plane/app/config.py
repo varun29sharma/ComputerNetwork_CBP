@@ -1,4 +1,9 @@
-"""Environment-driven configuration for the AegisX control plane (PDP)."""
+"""Environment-driven configuration for the AegisX control plane (PDP).
+
+Every setting reads from the environment with a safe local default, so the
+same code runs the demo, the tests and a real deployment -- and secrets like
+the JWT signing key never live in source code.
+"""
 import os
 from pathlib import Path
 

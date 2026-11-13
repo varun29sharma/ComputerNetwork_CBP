@@ -29,6 +29,13 @@ import org.slf4j.LoggerFactory;
  * closed before a single byte of payload is read (SDP "Authenticate-Before-
  * Connect" / cloaking).
  *
+ * <p>Fail-closed by design: with no {@code route:} record the gate stays shut
+ * (cloaked -- the connection is closed with no reply). That is also what a
+ * not-ready control plane means in practice: while the PDP reports
+ * {@code /ready} as not ready, no new tunnels are provisioned, so no new
+ * connections get in; already-open tunnels keep running until revalidation
+ * notices their route is gone.
+ *
  * <p>Configuration (env):
  * <ul>
  *   <li>{@code AEGISX_PEP_PORT} (default 9000)</li>

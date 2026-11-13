@@ -1,3 +1,9 @@
+"""Request/response shapes for the control-plane API (Pydantic models).
+
+These are the contract with clients: field limits here (max_length) are the
+first line of defence against oversized input, and every response model pins
+down exactly what a caller may rely on.
+"""
 from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
@@ -12,9 +18,10 @@ class PostureClaims(BaseModel):
 class LoginRequest(BaseModel):
     username: str = Field(..., max_length=64)
     password: str = Field(..., max_length=256)
-    # In production the source IP is extracted from the request socket (or a
-    # trusted proxy header); accepting it in the payload is a demo shortcut
-    # documented in the README's security notes.
+    # The login binds to the socket's real peer address by default; this field
+    # is honoured only behind a trusted proxy (AEGISX_TRUST_PROXY=1) with no
+    # X-Forwarded-For header -- e.g. tests simulating a proxy. It is never
+    # trusted on its own: anyone can claim any address in JSON.
     client_ip: Optional[str] = Field(default=None, max_length=45)
     # Which entitled application to open a tunnel to (default: first entitled).
     app: Optional[str] = Field(default=None, max_length=64)

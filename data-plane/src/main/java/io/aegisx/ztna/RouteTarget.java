@@ -3,6 +3,10 @@ package io.aegisx.ztna;
 /**
  * The authorized micro-tunnel destination parsed out of a Redis route value
  * (format: {@code host:port}, e.g. {@code 10.0.0.50:8080}).
+ *
+ * <p>Parsing is strict on purpose: a malformed route value must fail loudly
+ * (the auth handler then closes the connection) rather than being guessed at,
+ * because guessing a destination could send a client to the wrong application.
  */
 public record RouteTarget(String host, int port) {
 

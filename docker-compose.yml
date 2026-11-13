@@ -1,0 +1,66 @@
+# AegisX demo stack: one `docker compose up` runs the whole system.
+#
+#   dashboard / PDP : http://127.0.0.1:8000/   (control-plane)
+#   gateway / PEP   : 127.0.0.1:9000               (pep)
+#   redis           : 127.0.0.1:6379               (published so the demo can
+#                                                   inspect keys with redis-cli)
+#
+# The protected app (:8080) is deliberately NOT published: the only way to
+# reach it is through the PEP tunnel, which is the whole point of the demo.
+#
+# Compose file written, NOT runtime-verified (no Docker in the build VM).
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  control-plane:
+    build: ./control-plane
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      AEGISX_REDIS_URL: redis://redis:6379
+      # /demo/probe must dial the PEP by service name, not 127.0.0.1.
+      AEGISX_PEP_PROBE_ADDR: pep:9000
+    ports:
+      - "8000:8000"
+    healthcheck:
+      # /ready is 200 only when Redis pings OK and users are seeded; urllib
+      # raises (non-zero exit) on the 503, which is exactly what we want.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready')"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 20s
+
+  pep:
+    build: ./data-plane
+    depends_on:
+      redis:
+        condition: service_healthy
+      # Ordering only: the PEP never calls the PDP, it only reads Redis.
+      control-plane:
+        condition: service_started
+    environment:
+      AEGISX_REDIS_URL: redis://redis:6379
+      AEGISX_PEP_PORT: "9000"
+    ports:
+      - "9000:9000"
+
+  target:
+    build: ./examples
+    # APP_TARGETS hardcodes the tunnel destination as 127.0.0.1:8080
+    # (control-plane/app/identity.py), so the target must share the PEP's
+    # loopback: the PEP's outbound connect to 127.0.0.1:8080 lands here.
+    # The honest long-term fix is making APP_TARGETS environment-driven.
+    network_mode: "service:pep"
+    depends_on:
+      - pep

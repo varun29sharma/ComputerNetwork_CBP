@@ -1,4 +1,9 @@
-"""JWT minting / verification (HS256) with a jti claim for revocation."""
+"""JWT minting / verification (HS256) with a jti claim for revocation.
+
+Tokens are stateless -- the PDP never stores them -- so revocation works
+through the jti: logout/admin-revoke writes jwt:deny:<jti> to Redis, and
+every request checks that denylist before trusting the signature.
+"""
 import time
 import uuid
 from typing import Dict
